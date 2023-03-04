@@ -96,6 +96,23 @@ g_ray_isect_tab = {
    side = 0,
 }
 
+--- Get ray-circle collision
+-- @param rel_pos_x number
+-- @param rel_pos_y number
+-- @param dir_x number
+-- @param dir_y number
+-- @param rad number
+-- @return false, or distance along ray if colliding
+function g_ray_circ_collides(rel_pos_x, rel_pos_y, dir_x, dir_y, rad)
+   if (rel_pos_x * dir_x + rel_pos_y * dir_y) / math.sqrt(rel_pos_x * rel_pos_x + rel_pos_y * rel_pos_y) > 0 then --in front
+      local dist_perp = math.abs(dir_x * rel_pos_y - dir_y * rel_pos_x)
+      if dist_perp < rad then
+         return rel_pos_x * rel_pos_x + rel_pos_y * rel_pos_y - dist_perp * dist_perp
+      end
+   end
+   return false
+end
+
 --- Draw a triangular sprite
 -- @param pos_x number
 -- @param pos_y number
@@ -126,7 +143,7 @@ end
 -- 0: wall
 -- 1: item
 
---- Map-Ping hit indicator
+--- Map-Proj hit indicator
 Hitmark = {
    pos_x = 0,
    pos_y = 0,
@@ -156,11 +173,101 @@ function Hitmark:process(delta)
 end
 
 ----------------------------------------
--- Ping --------------------------------
+-- Weapon ------------------------------
 ----------------------------------------
 
---- Single-pixel ping used to uncover map
-Ping = {
+--- proj_type:
+-- 0: bullet
+
+--- target:
+-- 0: player
+-- 1: enemy
+
+Weapon = {
+   proj_type = 0,
+   target = 0,
+   proj_cnt = 0,
+   spread = 0,
+   accuracy = 0,
+   cooldown = 0,
+   cooldown_max = 0,
+   range = 0,
+   ammo = 0,
+}
+Weapon.__index = Weapon
+
+function Weapon.new(proj_type, target, proj_cnt, spread, accuracy, cooldown, range, ammo)
+   local self = setmetatable({}, Weapon)
+   self.proj_type = proj_type
+   self.target = target
+   self.proj_cnt = proj_cnt
+   self.spread = spread
+   self.accuracy = accuracy
+   self.cooldown_max = cooldown
+   self.range = range
+   self.ammo = ammo
+   return self
+end
+
+function Weapon:process(delta)
+   self.cooldown = math.max(self.cooldown - delta, 0)
+end
+
+function Weapon:fire(pos_x, pos_y, angle)
+   if self.cooldown == 0 and self.ammo ~= 0 then
+      self.cooldown = self.cooldown_max
+      self.ammo = self.ammo - 1
+      local math_random = math.random
+      local dangle = (self.spread * 2) / self.proj_cnt
+      local projs = g_projs
+      local table_insert = table.insert
+      for i = 0, self.proj_cnt do
+         table_insert(projs, Proj.new(pos_x, pos_y, angle - self.spread + dangle * i + (2 * math.random() - 1) * self.accuracy, .01, 5, false, self.target + 1))
+      end
+   end
+end
+
+----------------------------------------
+-- Enemy -------------------------------
+----------------------------------------
+
+Enemy = {
+   pos_x = 0,
+   pos_y = 0,
+   angle = 0,
+   display_timer = 0,
+}
+Enemy.__index = Enemy
+
+function Enemy.new(pos_x, pos_y)
+   local self = setmetatable({}, Enemy)
+   self.pos_x = pos_x
+   self.pos_y = pos_y
+   mset(pos_x, pos_y, 0)
+   return self
+end
+
+function Enemy:process(delta)
+   self.display_timer = self.display_timer + delta
+   if self.display_timer > 1000 then
+      self.display_timer = 0
+   elseif self.display_timer > 700 then
+      g_draw_sprite(self.pos_x, self.pos_y, self.angle, 2)
+   end
+end
+
+----------------------------------------
+-- Proj --------------------------------
+----------------------------------------
+
+--- type_idx:
+-- 0: ping
+-- 1: player bullet
+-- 2: enemy bullet
+-- 3: explosion
+
+--- Projectile
+Proj = {
    pos_x = 0,
    pos_y = 0,
    dir_x = 0,
@@ -171,11 +278,12 @@ Ping = {
    dist_rem = 0,
    dist_max = 0,
    can_bounce = false,
+   type_idx = 0,
 }
-Ping.__index = Ping
+Proj.__index = Proj
 
-function Ping.new(pos_x, pos_y, angle, vel, dist_max, can_bounce)
-   local self = setmetatable({}, Ping)
+function Proj.new(pos_x, pos_y, angle, vel, dist_max, can_bounce, type_idx)
+   local self = setmetatable({}, Proj)
    self.pos_x = pos_x
    self.pos_y = pos_y
    self.dir_x = math.cos(angle)
@@ -185,13 +293,14 @@ function Ping.new(pos_x, pos_y, angle, vel, dist_max, can_bounce)
    self.dist_rem = dist_max
    self.bounce_rem = bounce_rem
    self.can_bounce = can_bounce
+   self.type_idx = type_idx
    local isect = g_ray_isect(pos_x, pos_y, self.dir_x, self.dir_y)
    self.wall_dist = isect.dist
    self.wall_side = isect.side
    return self
 end
 
-function Ping:process(delta)
+function Proj:process(delta)
    local dist = self.vel * delta
    self.dist_rem = self.dist_rem - dist
    if self.dist_rem < 0 then
@@ -200,31 +309,67 @@ function Ping:process(delta)
 
    while true do
       local min_dist = math.min(self.wall_dist, dist)
+
+      if self.type_idx == 1 then
+         local enemies = g_enemies
+         local ray_circ_collides = g_ray_circ_collides
+         for k, v in pairs(enemies) do
+            local rel_pos_x = v.pos_x - self.pos_x
+            local rel_pos_y = v.pos_y - self.pos_y
+            local coll_dist = ray_circ_collides(rel_pos_x, rel_pos_y, self.dir_x, self.dir_y, 0.4)
+            if coll_dist and coll_dist <= min_dist then
+               local table_insert = table.insert
+               local projs = g_projs
+               local math_cos = math.cos
+               local math_sin = math.sin
+               local pos_x_proj = self.pos_x + self.dir_x * coll_dist
+               local pos_y_proj = self.pos_y + self.dir_y * coll_dist
+               for theta = 0, 6.28, 0.55 do
+                  table_insert(projs, Proj.new(pos_x_proj, pos_y_proj, theta, .005, .5, false, 3))
+               end
+               return true
+            end
+         end
+      end
+
       self.wall_dist = self.wall_dist - dist
       self.pos_x = self.pos_x + self.dir_x * min_dist
       self.pos_y = self.pos_y + self.dir_y * min_dist
 
-      if mget(self.pos_x, self.pos_y) == 2 then
-         local math_floor = math.floor
-         local pos_x_floor = math_floor(self.pos_x)
-         local pos_y_floor = math_floor(self.pos_y)
-         local rad_x = 2 * (self.pos_x - pos_x_floor - .5)
-         local rad_y = 2 * (self.pos_y - pos_y_floor - .5)
-         local angle = math.atan2(rad_y, rad_x)
-         table.insert(g_hitmarks, Hitmark.new(
-               pos_x_floor + .5 + .3 * math.cos(angle),
-               pos_y_floor + .5 + .3 * math.sin(angle),
-               1
-         ))
-         return true
+      if self.type_idx == 0 then
+         local tile_data = mget(self.pos_x, self.pos_y)
+         if tile_data == 2 then
+            local math_floor = math.floor
+            local pos_x_floor = math_floor(self.pos_x)
+            local pos_y_floor = math_floor(self.pos_y)
+            local rad_x = 2 * (self.pos_x - pos_x_floor - .5)
+            local rad_y = 2 * (self.pos_y - pos_y_floor - .5)
+            local angle = math.atan2(rad_y, rad_x)
+            table.insert(g_hitmarks, Hitmark.new(
+                  pos_x_floor + .5 + .3 * math.cos(angle),
+                  pos_y_floor + .5 + .3 * math.sin(angle),
+                  1
+            ))
+            return false
+         elseif tile_data == 3 then
+            local math_floor = math.floor
+            local pos_x_floor = math_floor(self.pos_x)
+            local pos_y_floor = math_floor(self.pos_y)
+            table.insert(g_enemies, Enemy.new(pos_x_floor + .5, pos_y_floor + .5))
+            return false
+         end
       end
 
       if self.wall_dist > 0 then
          local color
          if self.type_idx == 0 then
             color = 16 - 4 * (self.dist_rem / self.dist_max)
-         else -- self.type_idx == 1
-            color = 5
+         elseif self.type_idx == 1 then
+            color = 6
+         elseif self.type_idx == 2 then
+
+         else -- self.type_idx == 3
+            color = 5 - 3 * (self.dist_rem / self.dist_max)
          end
          pix(self.pos_x * 8, self.pos_y * 8, color)
          return false
@@ -259,20 +404,22 @@ Player = {
    angle = 0,
    ping_cooldown = 0,
    ping_passive_cooldown = 0,
+   weapon = nil,
 }
 Player.__index = Player
 
 function Player.new()
    local self = setmetatable({}, Player)
+   self.weapon = Weapon.new(0, 0, 1, 0, 0, 500, 20, -1)
    return self
 end
 
 function Player:ping()
-   local pings = g_pings
+   local projs = g_projs
    self.ping_cooldown = 1000
    local table_insert = table.insert
    for theta = -.5, .5, .003 do
-      table_insert(pings, Ping.new(self.pos_x, self.pos_y, self.angle + theta, .01, 10, false))
+      table_insert(projs, Proj.new(self.pos_x, self.pos_y, self.angle + theta, .01, 10, false, 0))
    end
 end
 
@@ -297,12 +444,20 @@ end
 function Player:process(delta)
    self.ping_cooldown = math.max(self.ping_cooldown - delta, 0)
    self.ping_passive_cooldown = self.ping_passive_cooldown - delta
+
+   if self.weapon then
+      self.weapon:process(delta)
+      if btn(5) then
+         self.weapon:fire(self.pos_x, self.pos_y, self.angle)
+      end
+   end
+
    if self.ping_passive_cooldown < 0 then
       self.ping_passive_cooldown = 800
       local table_insert = table.insert
-      local pings = g_pings
+      local projs = g_projs
       for theta = 0, 6.28, .1 do
-         table_insert(pings, Ping.new(self.pos_x, self.pos_y, self.angle + theta, .01, 1.5, false))
+         table_insert(projs, Proj.new(self.pos_x, self.pos_y, self.angle + theta, .01, 1.5, false, 0))
       end
    end
 
@@ -332,8 +487,9 @@ end
 function BOOT()
    g_player = Player.new()
    g_prev_time = time()
-   g_pings = {}
+   g_projs = {}
    g_hitmarks = {}
+   g_enemies = {}
 end
 
 function TIC()
@@ -344,8 +500,9 @@ function TIC()
    g_prev_time = t
 
    local player = g_player
-   local pings = g_pings
+   local projs = g_projs
    local hitmarks = g_hitmarks
+   local enemies = g_enemies
 
    -- map(0, 0)
    map(30, 0, 4, 17, 208, 0)
@@ -353,9 +510,9 @@ function TIC()
    -- process
    player:process(delta)
 
-   for k, v in pairs(pings) do
+   for k, v in pairs(projs) do
       if v:process(delta) then
-         pings[k] = nil
+         projs[k] = nil
       end
    end
 
@@ -365,18 +522,23 @@ function TIC()
       end
    end
 
+   for k, v in pairs(enemies) do
+      v:process(delta)
+   end
+
    print(string.format("FPS %d", math.floor(1000 / delta)), 0, 0, 5)
 end
 
 -- <TILES>
 -- 001:1111111111111111111111111111111111111111111111111111111111111111
 -- 002:0004400004400440040000404000000440000004040000400440044000044000
+-- 003:0000000000000000000000000002200000022000000000000000000000000000
 -- </TILES>
 
 -- <MAP>
 -- 000:101010101010101010101010101010101010101010101010100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 -- 001:100000000010000000001000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
--- 002:100000000000000020001000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+-- 002:100000000000003020001000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 -- 003:100000000010000000001000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 -- 004:101010101010000000001000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 -- 005:100000001000000000001000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
