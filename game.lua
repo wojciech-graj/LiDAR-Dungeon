@@ -13,6 +13,9 @@
 -- FUNCTION Class:process(delta): executed every frame. May return boolean,
 -- where true signifies that object should be deleted
 
+--- Interfaces
+-- Entity: pos_x, pos_y, angle, health, move, damage
+
 ----------------------------------------
 -- utility functions -------------------
 ----------------------------------------
@@ -102,7 +105,7 @@ g_ray_isect_tab = {
 -- @param dir_x number
 -- @param dir_y number
 -- @param rad number
--- @return false, or distance along ray if colliding
+-- @return distance along ray if colliding, 1e9 otherwise
 function g_ray_circ_collides(rel_pos_x, rel_pos_y, dir_x, dir_y, rad)
    if (rel_pos_x * dir_x + rel_pos_y * dir_y) / math.sqrt(rel_pos_x * rel_pos_x + rel_pos_y * rel_pos_y) > 0 then --in front
       local dist_perp = math.abs(dir_x * rel_pos_y - dir_y * rel_pos_x)
@@ -110,7 +113,7 @@ function g_ray_circ_collides(rel_pos_x, rel_pos_y, dir_x, dir_y, rad)
          return rel_pos_x * rel_pos_x + rel_pos_y * rel_pos_y - dist_perp * dist_perp
       end
    end
-   return false
+   return 1e9
 end
 
 --- Draw a triangular sprite
@@ -133,6 +136,35 @@ function g_draw_sprite(pos_x, pos_y, angle, color)
       pos_y_scl + 4 * math_sin(angle - 2.7),
       color
    )
+end
+
+--- Spawn explosion projectiles
+function g_explode(pos_x, pos_y)
+   local table_insert = table.insert
+   local projs = g_projs
+   local math_cos = math.cos
+   local math_sin = math.sin
+   for theta = 0, 6.28, 0.55 do
+      table_insert(projs, Proj.new(pos_x, pos_y, theta, .005, .5, false, 3))
+   end
+end
+
+----------------------------------------
+-- Entity ------------------------------
+----------------------------------------
+
+--- Move an entity
+-- @param dist number
+-- @param dir int: either 1 or -1 for forwards or backwards respectively
+function Entity_move(self, dist, dir)
+   local dir_x = dir * math.cos(self.angle)
+   local dir_y = dir * math.sin(self.angle)
+   local isect = g_ray_isect(self.pos_x, self.pos_y, dir_x, dir_y)
+   if isect.dist > 0.4 then
+      local dist_min = math.min(dist, math.max(0, isect.dist - 0.4))
+      self.pos_x = self.pos_x + dir_x * dist_min
+      self.pos_y = self.pos_y + dir_y * dist_min
+   end
 end
 
 ----------------------------------------
@@ -196,6 +228,11 @@ Weapon = {
 }
 Weapon.__index = Weapon
 
+g_damage_type_idx = {
+   [1] = 1,
+   [2] = 1,
+}
+
 function Weapon.new(proj_type, target, proj_cnt, spread, accuracy, cooldown, range, ammo)
    local self = setmetatable({}, Weapon)
    self.proj_type = proj_type
@@ -221,7 +258,7 @@ function Weapon:fire(pos_x, pos_y, angle)
       local dangle = (self.spread * 2) / self.proj_cnt
       local projs = g_projs
       local table_insert = table.insert
-      for i = 0, self.proj_cnt do
+      for i = 0, self.proj_cnt - 1 do
          table_insert(projs, Proj.new(pos_x, pos_y, angle - self.spread + dangle * i + (2 * math.random() - 1) * self.accuracy, .01, 5, false, self.target + 1))
       end
    end
@@ -236,23 +273,54 @@ Enemy = {
    pos_y = 0,
    angle = 0,
    display_timer = 0,
+   move = Entity_move,
+   speed = 0,
+   health = 0,
+   tab_idx = 0,
+   weapon = nil,
 }
 Enemy.__index = Enemy
 
-function Enemy.new(pos_x, pos_y)
+function Enemy.new(pos_x, pos_y, speed, health, weapon)
    local self = setmetatable({}, Enemy)
    self.pos_x = pos_x
    self.pos_y = pos_y
+   self.speed = speed
+   self.health = health
+   self.weapon = weapon
+   local enemies = g_enemies
+   self.tab_idx = enemies and #enemies + 1 or 1
    mset(pos_x, pos_y, 0)
    return self
 end
 
 function Enemy:process(delta)
    self.display_timer = self.display_timer + delta
-   if self.display_timer > 1000 then
+   self.weapon:process(delta)
+   if self.display_timer > 1500 then
       self.display_timer = 0
-   elseif self.display_timer > 700 then
+   elseif self.display_timer < 300 then
       g_draw_sprite(self.pos_x, self.pos_y, self.angle, 2)
+   end
+
+   local player = g_player
+   local dir_x = player.pos_x - self.pos_x
+   local dir_y = player.pos_y - self.pos_y
+   local dir_mag = math.sqrt(dir_x * dir_x + dir_y * dir_y)
+   local dir_invmag = 1 / dir_mag
+   local isect = g_ray_isect(self.pos_x, self.pos_y, dir_invmag * dir_x, dir_invmag * dir_y)
+   if dir_mag < isect.dist then -- if in line-of-sight
+      self.angle = math.atan2(dir_y, dir_x)
+      self:move(self.speed, 1)
+      self.weapon:fire(self.pos_x, self.pos_y, self.angle)
+   end
+end
+
+function Enemy:damage(dmg)
+   self.health = self.health - dmg
+   self.display_timer = 0
+   if self.health <= 0 then
+      g_enemies[self.tab_idx] = nil
    end
 end
 
@@ -262,9 +330,10 @@ end
 
 --- type_idx:
 -- 0: ping
--- 1: player bullet
--- 2: enemy bullet
+-- 1: enemy's bullet
+-- 2: player's bullet
 -- 3: explosion
+-- 4: homing enemy's bullet
 
 --- Projectile
 Proj = {
@@ -310,23 +379,37 @@ function Proj:process(delta)
    while true do
       local min_dist = math.min(self.wall_dist, dist)
 
-      if self.type_idx == 1 then
+      -- Entity collision
+      if self.type_idx == 1 or self.type_idx == 4 then
+         local ray_circ_collides = g_ray_circ_collides
+         local player = g_player
+         local rel_pos_x = player.pos_x - self.pos_x
+         local rel_pos_y = player.pos_y - self.pos_y
+         -- Homing
+         if self.type_idx == 4 then
+            local own_angle = math.atan2(self.dir_y, self.dir_x)
+            local tgt_angle = math.atan2(rel_pos_y, rel_pos_x)
+            local dangle = math.min(math.max(-.015, tgt_angle - own_angle), .015)
+            own_angle = own_angle + dangle
+            self.dir_x = math.cos(own_angle)
+            self.dir_y = math.sin(own_angle)
+         end
+         local coll_dist = ray_circ_collides(rel_pos_x, rel_pos_y, self.dir_x, self.dir_y, 0.4)
+         if coll_dist <= min_dist * min_dist then
+            g_explode(self.pos_x + self.dir_x * coll_dist, self.pos_y + self.dir_y * coll_dist)
+            player:damage(g_damage_type_idx[self.type_idx])
+            return true
+         end
+      elseif self.type_idx == 2 then
          local enemies = g_enemies
          local ray_circ_collides = g_ray_circ_collides
          for k, v in pairs(enemies) do
             local rel_pos_x = v.pos_x - self.pos_x
             local rel_pos_y = v.pos_y - self.pos_y
             local coll_dist = ray_circ_collides(rel_pos_x, rel_pos_y, self.dir_x, self.dir_y, 0.4)
-            if coll_dist and coll_dist <= min_dist then
-               local table_insert = table.insert
-               local projs = g_projs
-               local math_cos = math.cos
-               local math_sin = math.sin
-               local pos_x_proj = self.pos_x + self.dir_x * coll_dist
-               local pos_y_proj = self.pos_y + self.dir_y * coll_dist
-               for theta = 0, 6.28, 0.55 do
-                  table_insert(projs, Proj.new(pos_x_proj, pos_y_proj, theta, .005, .5, false, 3))
-               end
+            if coll_dist <= min_dist * min_dist then
+               g_explode(self.pos_x + self.dir_x * coll_dist, self.pos_y + self.dir_y * coll_dist)
+               v:damage(g_damage_type_idx[self.type_idx])
                return true
             end
          end
@@ -355,7 +438,8 @@ function Proj:process(delta)
             local math_floor = math.floor
             local pos_x_floor = math_floor(self.pos_x)
             local pos_y_floor = math_floor(self.pos_y)
-            table.insert(g_enemies, Enemy.new(pos_x_floor + .5, pos_y_floor + .5))
+            table.insert(g_enemies, Enemy.new(pos_x_floor + .5, pos_y_floor + .5, 0.001, 4,
+               Weapon.new(0, 0, 2, .2, .4, 1300, 7, -1)))
             return false
          end
       end
@@ -365,9 +449,9 @@ function Proj:process(delta)
          if self.type_idx == 0 then
             color = 16 - 4 * (self.dist_rem / self.dist_max)
          elseif self.type_idx == 1 then
-            color = 6
+            color = 2
          elseif self.type_idx == 2 then
-
+            color = 6
          else -- self.type_idx == 3
             color = 5 - 3 * (self.dist_rem / self.dist_max)
          end
@@ -405,12 +489,14 @@ Player = {
    ping_cooldown = 0,
    ping_passive_cooldown = 0,
    weapon = nil,
+   move = Entity_move,
+   health = 5,
 }
 Player.__index = Player
 
 function Player.new()
    local self = setmetatable({}, Player)
-   self.weapon = Weapon.new(0, 0, 1, 0, 0, 500, 20, -1)
+   self.weapon = Weapon.new(0, 1, 1, 0, 0, 600, 20, -1)
    return self
 end
 
@@ -420,20 +506,6 @@ function Player:ping()
    local table_insert = table.insert
    for theta = -.5, .5, .003 do
       table_insert(projs, Proj.new(self.pos_x, self.pos_y, self.angle + theta, .01, 10, false, 0))
-   end
-end
-
---- Move the player
--- @param dist number
--- @param dir int: either 1 or -1 for forwards or backwards respectively
-function Player:move(dist, dir)
-   local dir_x = dir * math.cos(self.angle)
-   local dir_y = dir * math.sin(self.angle)
-   local isect = g_ray_isect(self.pos_x, self.pos_y, dir_x, dir_y)
-   if isect.dist > 0.4 then
-      local dist_min = math.min(dist, math.max(0, isect.dist - 0.4))
-      self.pos_x = self.pos_x + dir_x * dist_min
-      self.pos_y = self.pos_y + dir_y * dist_min
    end
 end
 
@@ -480,24 +552,32 @@ function Player:process(delta)
    g_draw_sprite(self.pos_x, self.pos_y, self.angle, 5)
 end
 
+function Player:damage(dmg)
+   self.health = self.health - dmg
+end
+
 ----------------------------------------
 -- main --------------------------------
 ----------------------------------------
 
-function BOOT()
+function init()
    g_player = Player.new()
-   g_prev_time = time()
    g_projs = {}
    g_hitmarks = {}
    g_enemies = {}
 end
 
-function TIC()
-   cls()
+function BOOT()
+   init()
+   g_prev_time = time()
+end
 
+function TIC()
    local t = time()
    local delta = t - g_prev_time
    g_prev_time = t
+
+   cls()
 
    local player = g_player
    local projs = g_projs
