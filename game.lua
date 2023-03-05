@@ -154,14 +154,16 @@ end
 ----------------------------------------
 
 --- Move an entity
--- @param dist number
--- @param dir int: either 1 or -1 for forwards or backwards respectively
-function Entity_move(self, dist, dir)
-   local dir_x = dir * math.cos(self.angle)
-   local dir_y = dir * math.sin(self.angle)
+-- @param dist_front number
+-- @param dist_side number
+function Entity_move(self, dist_front, dist_side)
+   local dir_x_self = math.cos(self.angle)
+   local dir_y_self = math.sin(self.angle)
+   local dir_x = dist_front * dir_x_self + dist_side * dir_y_self
+   local dir_y = dist_front * dir_y_self - dist_side * dir_x_self
    local isect = g_ray_isect(self.pos_x, self.pos_y, dir_x, dir_y)
    if isect.dist > 0.4 then
-      local dist_min = math.min(dist, math.max(0, isect.dist - 0.4))
+      local dist_min = math.min(math.sqrt(dist_front * dist_front + dist_side * dist_side), math.max(0, isect.dist - 0.4))
       self.pos_x = self.pos_x + dir_x * dist_min
       self.pos_y = self.pos_y + dir_y * dist_min
    end
@@ -311,7 +313,7 @@ function Enemy:process(delta)
    local isect = g_ray_isect(self.pos_x, self.pos_y, dir_invmag * dir_x, dir_invmag * dir_y)
    if dir_mag < isect.dist then -- if in line-of-sight
       self.angle = math.atan2(dir_y, dir_x)
-      self:move(self.speed, 1)
+      self:move(self.speed, 0)
       self.weapon:fire(self.pos_x, self.pos_y, self.angle)
    end
 end
@@ -509,20 +511,9 @@ function Player:ping()
    end
 end
 
-function Player:rotate(theta)
-   self.angle = self.angle + theta
-end
-
 function Player:process(delta)
    self.ping_cooldown = math.max(self.ping_cooldown - delta, 0)
    self.ping_passive_cooldown = self.ping_passive_cooldown - delta
-
-   if self.weapon then
-      self.weapon:process(delta)
-      if btn(5) then
-         self.weapon:fire(self.pos_x, self.pos_y, self.angle)
-      end
-   end
 
    if self.ping_passive_cooldown < 0 then
       self.ping_passive_cooldown = 800
@@ -533,20 +524,40 @@ function Player:process(delta)
       end
    end
 
+   local mouse_x, mouse_y, mouse_left, mouse_mid, mouse_right = mouse()
+
+   local pos_x_rel = mouse_x - 8 * self.pos_x
+   local pos_y_rel = mouse_y - 8 * self.pos_y
+   self.angle = math.atan2(pos_y_rel, pos_x_rel)
+
+   local mov_front = 0
    if btn(0) then
-      self:move(0.01 * delta, 1)
+      mov_front = 1
    elseif btn(1) then
-      self:move(0.01 * delta, -1)
+      mov_front = -1
    end
 
+   local mov_side = 0
    if btn(2) then
-      self:rotate(-0.005 * delta)
+      mov_side = 1
    elseif btn(3) then
-      self:rotate(0.005 * delta)
+      mov_side = -1
    end
 
-   if btn(4) and self.ping_cooldown == 0 then
+   if mov_front ~= 0 or mov_side ~= 0 then
+      local mov_scl = delta * .02 / math.sqrt(mov_front * mov_front + mov_side * mov_side)
+      self:move(mov_front * mov_scl, mov_side * mov_scl)
+   end
+
+   if mouse_right and self.ping_cooldown == 0 then
       self:ping()
+   end
+
+   if self.weapon then
+      self.weapon:process(delta)
+      if mouse_left then
+         self.weapon:fire(self.pos_x, self.pos_y, self.angle)
+      end
    end
 
    g_draw_sprite(self.pos_x, self.pos_y, self.angle, 5)
@@ -577,6 +588,9 @@ function TIC()
    local delta = t - g_prev_time
    g_prev_time = t
 
+   -- Hide mouse
+   poke(0x3FFB, 0)
+
    cls()
 
    local player = g_player
@@ -606,6 +620,10 @@ function TIC()
       v:process(delta)
    end
 
+   -- Custom mouse
+   local mouse_x, mouse_y = mouse()
+   spr(257, mouse_x - 4, mouse_y - 4, 0)
+
    print(string.format("FPS %d", math.floor(1000 / delta)), 0, 0, 5)
 end
 
@@ -614,6 +632,10 @@ end
 -- 002:0004400004400440040000404000000440000004040000400440044000044000
 -- 003:0000000000000000000000000002200000022000000000000000000000000000
 -- </TILES>
+
+-- <SPRITES>
+-- 001:0000000000cccc000cc00cc00c0000c00c0000c00cc00cc000cccc0000000000
+-- </SPRITES>
 
 -- <MAP>
 -- 000:101010101010101010101010101010101010101010101010100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
