@@ -215,6 +215,7 @@ function g_ui_render()
    map(210 + 7 * player.weapon.cooldown / player.weapon.cooldown_max, 54, 1, 3, 224, 8)
 
    local string_format = string.format
+   local math_floor = math.floor
 
    -- Print self stats
    print("SELF", 208, 34, 2, true)
@@ -222,9 +223,9 @@ function g_ui_render()
 
    -- Print scanner stats
    print("SCAN", 208, 50, 8, true)
-   print(string_format("RNG:%d", player.ping_range), 209, 58, 8, false, 1, true)
+   print(string_format("RNG:%d", math_floor(player.ping_range)), 209, 58, 8, false, 1, true)
    print(string_format("REL:%.1f", player.ping_cooldown_max * .001), 209, 66, 8, false, 1, true)
-   print(string_format("SPR:%d", player.ping_spread * 10), 209, 74, 8, false, 1, true)
+   print(string_format("SPR:%d", math_floor(player.ping_spread * 10)), 209, 74, 8, false, 1, true)
 
    -- Print weapon stats
    local weapon = player.weapon
@@ -233,11 +234,11 @@ function g_ui_render()
    else -- weapon.proj_type == 1
       print("RCKT", 208, 82, 7, true)
    end
-   print(string_format("DMG:%d", weapon.damage), 209, 90, 7, false, 1, true)
+   print(string_format("DMG:%.1f", weapon.damage), 209, 90, 7, false, 1, true)
    print(string_format("REL:%.1f", weapon.cooldown_max * .001), 209, 98, 7, false, 1, true)
    print(string_format("BUL:%d", weapon.proj_cnt), 209, 106, 7, false, 1, true)
-   print(string_format("SPR:%d", weapon.spread * 10), 209, 114, 7, false, 1, true)
-   print(string_format("RNG:%d", weapon.range), 209, 122, 7, false, 1, true)
+   print(string_format("SPR:%d", math_floor(weapon.spread * 10)), 209, 114, 7, false, 1, true)
+   print(string_format("RNG:%d", math_floor(weapon.range)), 209, 122, 7, false, 1, true)
 end
 
 ----------------------------------------
@@ -536,6 +537,11 @@ end
 -- Enemy -------------------------------
 ----------------------------------------
 
+--- ai_idx:
+-- 1: follow
+-- 2: encircle
+-- 3: erratic
+
 Enemy = {
    pos_x = 0,
    pos_y = 0,
@@ -546,6 +552,10 @@ Enemy = {
    speed = 0,
    health = 0,
    weapon = nil,
+   ai_idx = 1,
+   pos_x_player_last = 0,
+   pos_y_player_last = 0,
+   vel_side = 0,
 }
 Enemy.__index = Enemy
 
@@ -556,6 +566,7 @@ function Enemy.new(pos_x, pos_y, speed, health, weapon)
    self.speed = speed
    self.health = health
    self.weapon = weapon
+   self.ai_idx = math.random(3)
    local enemies = g_enemies
    mset(pos_x, pos_y, 0)
    self:mark_area(true)
@@ -600,18 +611,49 @@ function Enemy:process(delta)
    local dir_mag = math.sqrt(dir_x * dir_x + dir_y * dir_y)
    local dir_invmag = 1 / dir_mag
    local isect = g_ray_isect(self.pos_x, self.pos_y, dir_invmag * dir_x, dir_invmag * dir_y)
+   local speed_fwd
    if dir_mag < isect.dist then -- in line-of-sight
-      self.angle = math.atan2(dir_y, dir_x)
-      self:move_rel(self.speed, 0)
+      self.pos_x_player_last = player.pos_x
+      self.pos_y_player_last = player.pos_y
+      if dir_mag < 2 then
+         self.speed_fwd = -self.speed
+      elseif dir_mag > 3 then
+         self.speed_fwd = self.speed
+      else
+         self.speed_fwd = 0
+      end
       self.weapon:fire(self.pos_x, self.pos_y, self.angle)
+   else
+      dir_x = self.pos_x_player_last - self.pos_x
+      dir_y = self.pos_y_player_last - self.pos_y
+      dir_mag = math.sqrt(dir_x * dir_x + dir_y * dir_y)
+      speed_fwd = math.min(self.speed, dir_mag)
    end
+   self.angle = math.atan2(dir_y, dir_x)
+
+   if self.ai_idx == 1 then
+   elseif self.ai_idx == 2 or self.ai_idx == 3 then
+      self.vel_side = self.vel_side + (math.random() - .5) * self.speed * .3
+      if self.ai_idx == 3 then
+         self.speed_fwd = self.speed_fwd + (math.random() - .5) * self.vel_side
+      end
+   end
+   self:move_rel(self.speed_fwd, self.vel_side)
 
    self:mark_area(true)
 end
 
 function Enemy:damage(dmg)
    self.health = self.health - dmg
-   return self.health <= 0
+   if self.health <= 0 then
+      local explode = g_explode
+      local math_random = math.random
+      for i = 0, 5 do
+         explode(self.pos_x + math_random() - .5, self.pos_y + math_random() - .5)
+      end
+      return true
+   end
+   return false
 end
 
 function Enemy:pinged()
@@ -750,7 +792,7 @@ function Proj:process(delta)
             local math_floor = math.floor
             local pos_x_floor = math_floor(self.pos_x)
             local pos_y_floor = math_floor(self.pos_y)
-            table.insert(g_enemies, Enemy.new(pos_x_floor + .5, pos_y_floor + .5, .001, 4,
+            table.insert(g_enemies, Enemy.new(pos_x_floor + .5, pos_y_floor + .5, .01, 4,
                Weapon.new(0, 0, 2, .2, .4, 1300, 7, -1, 1)))
             return false
          end
