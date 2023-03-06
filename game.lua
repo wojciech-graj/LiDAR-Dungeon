@@ -2,9 +2,27 @@
 -- author:  Wojciech Graj
 -- desc:    TODO
 -- site:    TODO
--- license: AGPL-3.0-only
+-- license: AGPL-3.0-or-later
 -- version: 0.0
 -- script:  lua
+
+--[[
+    TODO: <one line to give the program's name and a brief idea of what it does.>
+    Copyright (C) 2023  Wojciech Graj
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU Affero General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU Affero General Public License for more details.
+
+    You should have received a copy of the GNU Affero General Public License
+    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+--]]
 
 --- Conventions
 -- VARIABLE delta: time since last frame (ms)
@@ -26,6 +44,7 @@
 -- 8: Wall
 -- 16: Item
 -- 24: Inactive Enemy
+-- 32: Exit
 
 ----------------------------------------
 -- utility functions -------------------
@@ -116,11 +135,11 @@ g_ray_isect_tab = {
 -- @param dir_x number
 -- @param dir_y number
 -- @param rad number
--- @return distance along ray if colliding, 1e9 otherwise
+-- @return squared distance along ray if colliding, 1e9 otherwise
 function g_ray_circ_collides(rel_pos_x, rel_pos_y, dir_x, dir_y, rad)
-   if (rel_pos_x * dir_x + rel_pos_y * dir_y) / math.sqrt(rel_pos_x * rel_pos_x + rel_pos_y * rel_pos_y) > 0 then --in front
+   if (rel_pos_x * dir_x + rel_pos_y * dir_y) / math.sqrt(rel_pos_x * rel_pos_x + rel_pos_y * rel_pos_y) > 0 then -- in front
       local dist_perp = math.abs(dir_x * rel_pos_y - dir_y * rel_pos_x)
-      if dist_perp < rad then
+      if dist_perp < rad then -- within radius
          return rel_pos_x * rel_pos_x + rel_pos_y * rel_pos_y - dist_perp * dist_perp
       end
    end
@@ -157,7 +176,7 @@ function g_explode(pos_x, pos_y)
    local projs = g_projs
    local math_cos = math.cos
    local math_sin = math.sin
-   for theta = 0, 6.28, 0.55 do
+   for theta = 0, 6.28, .55 do
       table_insert(projs, Proj.new(pos_x, pos_y, theta, .005, .5, false, 3))
    end
 end
@@ -169,11 +188,14 @@ function g_item_pickup(pos_x, pos_y)
    mset(pos_x, pos_y, 0)
    g_state = 2
    local math_random = math.random
+
+   -- select 2 different item types
    local item_1_idx = math_random(5)
    local item_2_idx
    repeat
       item_2_idx = math_random(5)
    until (item_2_idx ~= item_1_idx)
+
    g_items = {
       Item.new(item_1_idx),
       Item.new(item_2_idx),
@@ -182,22 +204,29 @@ end
 
 -- Draw UI
 function g_ui_render()
+   -- Draw borders
+   map(210, 34, 5, 17, 200, 0)
+
    local player = g_player
 
-   map(210, 34, 5, 17, 200, 0)
+   -- Draw bars
    map(217 - player.health, 51, 1, 3, 208, 8)
    map(210 + 7 * player.ping_cooldown / player.ping_cooldown_max, 57, 1, 3, 216, 8)
    map(210 + 7 * player.weapon.cooldown / player.weapon.cooldown_max, 54, 1, 3, 224, 8)
 
    local string_format = string.format
+
+   -- Print self stats
    print("SELF", 208, 34, 2, true)
    print(string_format("SPD:%.1f", player.speed * 1000), 209, 42, 2, false, 1, true)
 
+   -- Print scanner stats
    print("SCAN", 208, 50, 8, true)
    print(string_format("RNG:%d", player.ping_range), 209, 58, 8, false, 1, true)
    print(string_format("REL:%.1f", player.ping_cooldown_max * .001), 209, 66, 8, false, 1, true)
    print(string_format("SPR:%d", player.ping_spread * 10), 209, 74, 8, false, 1, true)
 
+   -- Print weapon stats
    local weapon = player.weapon
    if weapon.proj_type == 0 then
       print("GUN", 212, 82, 7, true)
@@ -396,8 +425,8 @@ function Entity:move_abs(dist_x, dist_y)
    local dir_x = dist_x * dist_invmag
    local dir_y = dist_y * dist_invmag
    local isect = g_ray_isect(self.pos_x, self.pos_y, dir_x, dir_y)
-   if isect.dist > 0.4 then
-      local dist_min = math.min(dist_mag, math.max(0, isect.dist - 0.4))
+   if isect.dist > .4 then -- not approaching wall
+      local dist_min = math.min(dist_mag, math.max(0, isect.dist - .4))
       self.pos_x = self.pos_x + dir_x * dist_min
       self.pos_y = self.pos_y + dir_y * dist_min
    end
@@ -410,6 +439,7 @@ end
 -- type_idx:
 -- 0: wall
 -- 1: item
+-- 2: exit
 
 --- Map-Proj hit indicator
 Hitmark = {
@@ -432,9 +462,11 @@ function Hitmark:process(delta)
    self.age = self.age + delta
    local color
    if self.type_idx == 0 then
-      color = 12 + self.age * 0.002
-   else -- self.type_idx == 1
-      color = 6
+      color = 12 + self.age * .002
+   elseif self.type_idx == 1 then
+      color = 4
+   else -- self.type_idx == 2
+      color = 11
    end
    pix(self.pos_x * 8, self.pos_y * 8, color)
    return self.age > 1000
@@ -530,11 +562,12 @@ function Enemy.new(pos_x, pos_y, speed, health, weapon)
    return self
 end
 
+-- Calculate tiles within hitbox on an axis
 function Enemy.calc_occupied(pos)
    local pos_frac = pos % 1
-   if pos_frac < 0.4 then
+   if pos_frac < .4 then
       return {pos, pos - 1}
-   elseif pos_frac > 0.6 then
+   elseif pos_frac > .6 then
       return {pos, pos + 1}
    else
       return {pos}
@@ -544,8 +577,8 @@ end
 --- Mark/unmark map tiles containing self
 -- @param mark boolean: true to mark, false to unmark
 function Enemy:mark_area(mark)
-   for k_x, v_x in pairs(self.calc_occupied(self.pos_x)) do
-      for k_y, v_y in pairs(self.calc_occupied(self.pos_y)) do
+   for _, v_x in pairs(self.calc_occupied(self.pos_x)) do
+      for _, v_y in pairs(self.calc_occupied(self.pos_y)) do
          local tile_data = mget(v_x, v_y)
          mset(v_x, v_y, mark and tile_data + 1 or tile_data - 1)
       end
@@ -567,7 +600,7 @@ function Enemy:process(delta)
    local dir_mag = math.sqrt(dir_x * dir_x + dir_y * dir_y)
    local dir_invmag = 1 / dir_mag
    local isect = g_ray_isect(self.pos_x, self.pos_y, dir_invmag * dir_x, dir_invmag * dir_y)
-   if dir_mag < isect.dist then -- if in line-of-sight
+   if dir_mag < isect.dist then -- in line-of-sight
       self.angle = math.atan2(dir_y, dir_x)
       self:move_rel(self.speed, 0)
       self.weapon:fire(self.pos_x, self.pos_y, self.angle)
@@ -635,19 +668,20 @@ end
 function Proj:process(delta)
    local dist = self.vel * delta
    self.dist_rem = self.dist_rem - dist
-   if self.dist_rem < 0 then
+   if self.dist_rem < 0 then -- beyond range
       return true
    end
 
-   while true do
+   while true do -- Repeat until wall collisions resolved
       local min_dist = math.min(self.wall_dist, dist)
 
       -- Entity collision
-      if self.type_idx == 1 or self.type_idx == 4 then
+      if self.type_idx == 1 or self.type_idx == 4 then -- enemy's projectile
          local ray_circ_collides = g_ray_circ_collides
          local player = g_player
          local rel_pos_x = player.pos_x - self.pos_x
          local rel_pos_y = player.pos_y - self.pos_y
+
          -- Homing
          if self.type_idx == 4 then
             local own_angle = math.atan2(self.dir_y, self.dir_x)
@@ -657,27 +691,32 @@ function Proj:process(delta)
             self.dir_x = math.cos(own_angle)
             self.dir_y = math.sin(own_angle)
          end
-         local coll_dist = ray_circ_collides(rel_pos_x, rel_pos_y, self.dir_x, self.dir_y, 0.4)
-         if coll_dist <= min_dist * min_dist then
-            g_explode(self.pos_x + self.dir_x * coll_dist, self.pos_y + self.dir_y * coll_dist)
+
+         -- Collision
+         local dist_coll_sqr = ray_circ_collides(rel_pos_x, rel_pos_y, self.dir_x, self.dir_y, .4)
+         if dist_coll_sqr <= min_dist * min_dist then
+            local dist_coll = math.sqrt(dist_coll_sqr)
+            g_explode(self.pos_x + self.dir_x * dist_coll, self.pos_y + self.dir_y * dist_coll)
             player:damage(self.damage)
             return true
          end
-      elseif self.type_idx == 0 or self.type_idx == 2 then
-         local enemy_cnt = mget(self.pos_x, self.pos_y) & 0x7
-         if enemy_cnt > 0 then
+      elseif self.type_idx == 0 or self.type_idx == 2 then -- player's projectile or ping
+         if mget(self.pos_x, self.pos_y) & 0x7 > 0 then -- on tile containing enemy
             local enemies = g_enemies
             local ray_circ_collides = g_ray_circ_collides
             for k, v in pairs(enemies) do
                local rel_pos_x = v.pos_x - self.pos_x
                local rel_pos_y = v.pos_y - self.pos_y
-               local coll_dist = ray_circ_collides(rel_pos_x, rel_pos_y, self.dir_x, self.dir_y, 0.4)
-               if coll_dist <= min_dist * min_dist then
+
+               -- Collision
+               local dist_coll_sqr = ray_circ_collides(rel_pos_x, rel_pos_y, self.dir_x, self.dir_y, .4)
+               if dist_coll_sqr <= min_dist * min_dist then
                   if self.type_idx == 0 then
                      v:pinged()
                   else -- self.type_idx == 2
-                     g_explode(self.pos_x + self.dir_x * coll_dist, self.pos_y + self.dir_y * coll_dist)
-                     if v:damage(self.damage) then
+                     local dist_coll = math.sqrt(dist_coll_sqr)
+                     g_explode(self.pos_x + self.dir_x * dist_coll, self.pos_y + self.dir_y * dist_coll)
+                     if v:damage(self.damage) then -- enemy should die
                         enemies[k] = nil
                      end
                      return true
@@ -691,10 +730,10 @@ function Proj:process(delta)
       self.pos_x = self.pos_x + self.dir_x * min_dist
       self.pos_y = self.pos_y + self.dir_y * min_dist
 
-      if self.type_idx == 0 then
+      if self.type_idx == 0 then -- ping
          local tile_data = mget(self.pos_x, self.pos_y)
          local tile = tile_data & 0x38
-         if tile == 16 then
+         if tile == 16 or tile == 32 then -- item or exit
             local math_floor = math.floor
             local pos_x_floor = math_floor(self.pos_x)
             local pos_y_floor = math_floor(self.pos_y)
@@ -704,20 +743,20 @@ function Proj:process(delta)
             table.insert(g_hitmarks, Hitmark.new(
                pos_x_floor + .5 + .3 * math.cos(angle),
                pos_y_floor + .5 + .3 * math.sin(angle),
-               1
+               (tile == 16) and 1 or 2
             ))
             return false
          elseif tile_data == 24 then
             local math_floor = math.floor
             local pos_x_floor = math_floor(self.pos_x)
             local pos_y_floor = math_floor(self.pos_y)
-            table.insert(g_enemies, Enemy.new(pos_x_floor + .5, pos_y_floor + .5, 0.001, 4,
+            table.insert(g_enemies, Enemy.new(pos_x_floor + .5, pos_y_floor + .5, .001, 4,
                Weapon.new(0, 0, 2, .2, .4, 1300, 7, -1, 1)))
             return false
          end
       end
 
-      if self.wall_dist > 0 then
+      if self.wall_dist > 0 then -- not colliding with wall
          local color
          if self.type_idx == 0 then
             color = 16 - 4 * (self.dist_rem / self.dist_max)
@@ -738,6 +777,7 @@ function Proj:process(delta)
          return true
       end
 
+      -- Bounce
       self.dist = -self.wall_dist
       if self.wall_side == 0 then
          self.dir_x = -self.dir_x
@@ -838,9 +878,11 @@ function Player:process(delta)
       end
    end
 
-   local tile_data = mget(self.pos_x, self.pos_y)
-   if tile_data & 0x38 == 16 then
+   local tile = mget(self.pos_x, self.pos_y) & 0x38
+   if tile == 16 then
       g_item_pickup(self.pos_x, self.pos_y)
+   elseif tile == 32 then
+      -- TODO: next level
    end
 
    g_draw_sprite(self.pos_x, self.pos_y, self.angle, 5)
@@ -890,21 +932,24 @@ function process_game(delta)
    -- map(0, 0)
    g_ui_render()
 
-   -- process
+   -- Processes
    player:process(delta)
 
+   -- Projectile process
    for k, v in pairs(projs) do
       if v:process(delta) then
          projs[k] = nil
       end
    end
 
+   -- Hitmark process
    for k, v in pairs(hitmarks) do
       if v:process(delta) then
          hitmarks[k] = nil
       end
    end
 
+   -- Enemies process
    for k, v in pairs(enemies) do
       v:process(delta)
    end
@@ -915,10 +960,13 @@ function process_item_pickup(delta)
 
    map(210, 0, 18, 15, 28, 8)
    print("SKIP", 88, 106, 2, true)
+
    local t = g_t
    local color_start = t // 70
    local offset_y = t / 100
    local math_sin = math.sin
+
+   -- Print bobbing rainbow "UPGRADE" text
    for k, v in ipairs(gc_upgrade_text_tab) do
       print(v, 73 + 6 * k, 10 + math_sin(offset_y + k * .7), color_start + k, true)
    end
@@ -929,6 +977,7 @@ function process_item_pickup(delta)
 
    g_ui_render()
 
+   -- Check for selection
    local mouse_x, mouse_y, mouse_left = table.unpack(g_mouse)
    if mouse_left and not g_mouse_prev[3] then
       if mouse_y >= 24 and mouse_y <= 96 then
@@ -968,6 +1017,7 @@ function TIC()
    -- Hide mouse
    poke(0x3FFB, 0)
 
+   -- process
    local state = g_state
    if state == 1 then
       process_game(delta)
@@ -1114,7 +1164,7 @@ end
 -- 005:800000008000000000008000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300030000000003000003000000000300030000000000000000000000000
 -- 006:800000008000000000008000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300050000000005000005000000000500030000000000000000000000000
 -- 007:8000000000000000000080000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003000e0c0c0c0c0d00000e0c0c0c0c0d00030000000000000000000000000
--- 008:800000008000000000008000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300070000000007000007000000000700030000000000000000000000000
+-- 008:800000008000000200008000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300070000000007000007000000000700030000000000000000000000000
 -- 009:800000008000000000008000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300050000000005000005000000000500030000000000000000000000000
 -- 010:800000008080800080808080808080800000000000000000800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300090602020408000009060202040800030000000000000000000000000
 -- 011:800000008000000000000000000000800000000000000000800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000030000000000000000000000000
