@@ -802,7 +802,7 @@ function Player:process(delta)
       end
    end
 
-   local mouse_x, mouse_y, mouse_left, mouse_mid, mouse_right = mouse()
+   local mouse_x, mouse_y, mouse_left, mouse_mid, mouse_right = table.unpack(g_mouse)
 
    local pos_x_rel = mouse_x - 8 * self.pos_x
    local pos_y_rel = mouse_y - 8 * self.pos_y
@@ -827,7 +827,7 @@ function Player:process(delta)
       self:move_abs(mov_side * mov_scl, mov_front * mov_scl)
    end
 
-   if mouse_right and self.ping_cooldown == 0 then
+   if mouse_right and self.ping_cooldown == 0 and not g_mouse_prev[5] then
       self:ping()
    end
 
@@ -870,6 +870,8 @@ function init()
    g_state = 1
    g_items = {}
    g_t = time()
+   g_mouse = table.pack(mouse())
+   g_mouse_prev = {}
 end
 
 function BOOT()
@@ -927,8 +929,8 @@ function process_item_pickup(delta)
 
    g_ui_render()
 
-   local mouse_x, mouse_y, mouse_left = mouse()
-   if mouse_left and g_item_pickup_mouse_rel then
+   local mouse_x, mouse_y, mouse_left = table.unpack(g_mouse)
+   if mouse_left and not g_mouse_prev[3] then
       if mouse_y >= 24 and mouse_y <= 96 then
          if mouse_x >= 44 and mouse_x <= 92 then
             items[1]:apply()
@@ -941,8 +943,6 @@ function process_item_pickup(delta)
          and mouse_x >= 76 and mouse_x <= 124 then
          g_state = 1
       end
-   else
-      g_item_pickup_mouse_rel = true
    end
 end
 gc_upgrade_text_tab = {
@@ -961,6 +961,10 @@ function TIC()
    local delta = t - g_prev_time
    g_prev_time = t
 
+   g_mouse_prev = g_mouse
+   local v_mouse = table.pack(mouse())
+   g_mouse = v_mouse
+
    -- Hide mouse
    poke(0x3FFB, 0)
 
@@ -971,9 +975,8 @@ function TIC()
       process_item_pickup(delta)
    end
 
-   -- Custom mouse
-   local mouse_x, mouse_y = mouse()
-   spr(257, mouse_x - 4, mouse_y - 4, 0)
+   -- Custom mouse sprite
+   spr(257, v_mouse[1] - 4, v_mouse[2] - 4, 0)
 
    print(string.format("FPS %d", math.floor(1000 / delta)), 0, 0, 5)
 end
