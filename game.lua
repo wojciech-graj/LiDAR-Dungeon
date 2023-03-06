@@ -29,6 +29,7 @@
 -- VARIABLE g_*: global variable
 -- VARIABLE dir_*: normalized direction
 -- VARIABLE c_*: constant variable
+-- VARIABLE room: {start_x, start_x, end_x, end_y}
 -- FUNCTION Class:process(delta): executed every frame. May return boolean,
 -- where true signifies that object should be deleted
 
@@ -51,7 +52,6 @@
 ----------------------------------------
 
 --- Get the sign of a number
--- @param x number
 -- @return int
 function g_math_sign(x)
    return x > 0 and 1 or x < 0 and -1 or 0
@@ -60,10 +60,6 @@ end
 --- Calculate a ray-map intersection
 -- Uses Digital Differential Analyzer (DDA) voxel traversal to find closest wall
 -- intersection.
--- @param pos_x number
--- @param pos_y number
--- @param dir_x number
--- @param dir_y number
 -- @return table
 function g_ray_isect(pos_x, pos_y, dir_x, dir_y)
    local math_floor = math.floor
@@ -130,11 +126,6 @@ g_ray_isect_tab = {
 }
 
 --- Get ray-circle collision
--- @param rel_pos_x number
--- @param rel_pos_y number
--- @param dir_x number
--- @param dir_y number
--- @param rad number
 -- @return squared distance along ray if colliding, 1e9 otherwise
 function g_ray_circ_collides(rel_pos_x, rel_pos_y, dir_x, dir_y, rad)
    if (rel_pos_x * dir_x + rel_pos_y * dir_y) / math.sqrt(rel_pos_x * rel_pos_x + rel_pos_y * rel_pos_y) > 0 then -- in front
@@ -147,15 +138,11 @@ function g_ray_circ_collides(rel_pos_x, rel_pos_y, dir_x, dir_y, rad)
 end
 
 --- Draw a triangular sprite
--- @param pos_x number
--- @param pos_y number
--- @param angle number
--- @param color int
 function g_draw_sprite(pos_x, pos_y, angle, color)
    local math_cos = math.cos
    local math_sin = math.sin
-   local pos_x_scl = 8 * pos_x
-   local pos_y_scl = 8 * pos_y
+   local pos_x_scl = (pos_x % 25) * 8
+   local pos_y_scl = (pos_y % 17) * 8
 
    tri(
       pos_x_scl + 4 * math_cos(angle),
@@ -169,8 +156,6 @@ function g_draw_sprite(pos_x, pos_y, angle, color)
 end
 
 --- Spawn explosion projectiles
--- @param pos_x number
--- @param pos_y number
 function g_explode(pos_x, pos_y)
    local table_insert = table.insert
    local projs = g_projs
@@ -182,8 +167,6 @@ function g_explode(pos_x, pos_y)
 end
 
 --- Pick up item
--- @param pos_x number
--- @param pos_y number
 function g_item_pickup(pos_x, pos_y)
    mset(pos_x, pos_y, 0)
    g_state = 2
@@ -239,6 +222,171 @@ function g_ui_render()
    print(string_format("BUL:%d", weapon.proj_cnt), 209, 106, 7, false, 1, true)
    print(string_format("SPR:%d", math_floor(weapon.spread * 10)), 209, 114, 7, false, 1, true)
    print(string_format("RNG:%d", math_floor(weapon.range)), 209, 122, 7, false, 1, true)
+end
+
+-- pix, but with absolute position and checks to verify if on screen
+function g_pix_bounded(pos_x, pos_y, color)
+   local player = g_player
+   if pos_x > player.pos_x_scr * 25 and pos_x < player.pos_x_scr * 25 + 25
+      and pos_y > player.pos_y_scr * 17 and pos_y < player.pos_y_scr * 17 + 17 then
+      pix((pos_x % 25) * 8, (pos_y % 17) * 8, color)
+   end
+end
+
+----------------------------------------
+-- map generation ----------------------
+----------------------------------------
+
+--- Naming:
+-- s*: (start) top left corner
+-- e*: (end) bottom right corner
+-- l*: (length) width/height including walls
+-- r*: (room) relating to current room
+-- t*: screen index
+
+--- Adds area to free areas if suitable
+function g_map_gen_add_area(tab, sx, sy, ex, ey, lx, ly)
+   if lx < 6 or ly < 6 then
+      return
+   end
+   table.insert(tab, {sx, sy, ex, ey, lx, ly})
+end
+
+--- Digs a corridor out of room
+function g_dig_corridor(x, y, dx, dy)
+   local math_random = math.random
+
+   -- Don't always dig tunnel
+   if math_random() < .3 then
+      return
+   end
+
+   while mget(x, y) ~= 0 do -- haven't reached open space
+      -- Dig
+      mset(x, y, 0)
+      if mget(x + dy, y + dx) ~= 0 then
+         mset(x + dy, y + dx, 8)
+      end
+      if mget(x - dy, y - dx) ~= 0 then
+         mset(x - dy, y - dx, 8)
+      end
+
+      -- Check edge of map collision, exit if so
+      if x >= 199 then
+         mset(199, y, 8)
+         return
+      elseif x <= 0 then
+         mset(0, y, 8)
+         return
+      end
+      if y >= 118 then
+         mset(x, 118, 8)
+         return
+      elseif y <= 0 then
+         mset(x, 0, 8)
+         return
+      end
+
+      -- Meander sometimes
+      if math_random() < .1 then
+         x = x + dy
+         y = y + dx
+      else
+         x = x + dx
+         y = y + dy
+      end
+   end
+end
+
+--- Generates map
+function g_map_gen()
+   -- Clear map
+   for x = 0, 200 do
+      for y = 0, 119 do
+         mset(x, y, 128)
+      end
+   end
+
+   local math_min = math.min
+   local math_max = math.max
+   local table_insert = table.insert
+   local table_remove = table.remove
+   local table_unpack = table.unpack
+   local math_random = math.random
+   local math_floor = math.floor
+   local map_gen_add_area = g_map_gen_add_area
+
+   local rooms = {}
+
+   -- Place rooms
+   for tx = 0, 7 do -- Generate each screen separately to limit rooms to single screen
+      for ty = 0, 6 do
+         local free_area = {{25 * tx, 17 * ty, 25 * tx + 24, 17 * ty + 16, 24, 16}}
+         while #free_area > 0 do
+            local sx, sy, ex, ey, lx, ly = table_unpack(table_remove(free_area))
+
+            -- Place room
+            local rlx = math_random(6, math_min(lx, 11))
+            local rly = math_random(6, math_min(ly, 9))
+            local rsx = (ex - rlx ~= sx) and math_random(sx, ex - rlx) or sx
+            local rsy = (ey - rly ~= sy) and math_random(sy, ey - rly) or sy
+            local rex = rsx + rlx
+            local rey = rsy + rly
+            table_insert(rooms, {rsx, rsy, rex, rey})
+
+            -- Draw to map
+            for x = rsx, rex do
+               mset(x, rsy, 8)
+               mset(x, rey, 8)
+            end
+            for y = rsy, rey do
+               mset(rsx, y, 8)
+               mset(rex, y, 8)
+            end
+            for y = rsy + 1, rey - 1 do
+               for x = rsx + 1, rex - 1 do
+                  mset(x, y, 0)
+               end
+            end
+
+            local right = ex - rex
+            local left = rsx - sx
+            local top = rsy - sy
+            local bottom = ey - rey
+
+            -- Split remaining space into 4 areas
+            if math_max(left, right) > math_max(top, bottom) then
+               map_gen_add_area(free_area, sx, sy, rsx, ey, left, ly)
+               map_gen_add_area(free_area, rex, sy, ex, ey, right, ly)
+               map_gen_add_area(free_area, rsx, sy, rex, rsy, rlx, top)
+               map_gen_add_area(free_area, rsx, rey, rex, ey, rlx, bottom)
+            else
+               map_gen_add_area(free_area, sx, sy, ex, rsy, lx, top)
+               map_gen_add_area(free_area, sx, rey, ex, ey, lx, bottom)
+               map_gen_add_area(free_area, sx, rsy, rsx, rey, left, rly)
+               map_gen_add_area(free_area, rex, rsy, ex, rey, right, rly)
+            end
+         end
+      end
+   end
+
+   local dig_corridor = g_dig_corridor
+
+   -- Dig corridors
+   for _, room in pairs(rooms) do
+      local sx, sy, ex, ey = table_unpack(room)
+      dig_corridor(ex, sy + math_random(ey - sy - 2), 1, 0)
+      dig_corridor(sx, sy + math_random(ey - sy - 2), -1, 0)
+      dig_corridor(sx + math_random(ex - sx - 2), ey, 0, 1)
+      dig_corridor(sx + math_random(ex - sx - 2), sy, 0, -1)
+   end
+
+   local start_room = table_remove(rooms, math.random(#rooms))
+
+   -- TODO: verify only one graph containing all rooms
+   -- TODO: place items, enemies, and exits
+
+   return start_room
 end
 
 ----------------------------------------
@@ -394,7 +542,7 @@ function Item:apply()
       elseif self.subtype_idx == 6 then
          player.weapon.range = player.weapon.range + self.data
       else -- self.subtype_idx == 7
-         player.weapon.can_bounce = true
+         playper.weapon.can_bounce = true
       end
    else -- self.type_idx == 5
       player:heal(self.data)
@@ -409,8 +557,6 @@ Entity = {}
 Entity.__index = Entity
 
 --- Move an entity relative to its angle
--- @param dist_front number
--- @param dist_side number
 function Entity:move_rel(dist_front, dist_side)
    local dir_x_self = math.cos(self.angle)
    local dir_y_self = math.sin(self.angle)
@@ -418,8 +564,6 @@ function Entity:move_rel(dist_front, dist_side)
 end
 
 --- Move an entity relative to the XY axes
--- @param dist_front number
--- @param dist_side number
 function Entity:move_abs(dist_x, dist_y)
    local dist_mag = math.sqrt(dist_x * dist_x + dist_y * dist_y)
    local dist_invmag = 1 / dist_mag
@@ -469,7 +613,7 @@ function Hitmark:process(delta)
    else -- self.type_idx == 2
       color = 11
    end
-   pix(self.pos_x * 8, self.pos_y * 8, color)
+   g_pix_bounded(self.pos_x, self.pos_y, color)
    return self.age > 1000
 end
 
@@ -809,7 +953,7 @@ function Proj:process(delta)
          else -- self.type_idx == 3
             color = 5 - 3 * (self.dist_rem / self.dist_max)
          end
-         pix(self.pos_x * 8, self.pos_y * 8, color)
+         g_pix_bounded(self.pos_x, self.pos_y, color)
          return false
       end
 
@@ -840,6 +984,8 @@ end
 Player = {
    pos_x = 3,
    pos_y = 3,
+   pos_x_scr = 0,
+   pos_y_scr = 0,
    angle = 0,
    ping_cooldown = 0,
    ping_passive_cooldown = 0,
@@ -850,13 +996,16 @@ Player = {
    move_rel = Entity.move_rel,
    health = 5,
    speed = .005,
-   ping_cooldown_max = 800,
+   ping_cooldown_max = 400,
    can_bounce = false,
 }
 Player.__index = Player
 
-function Player.new()
+function Player.new(room)
    local self = setmetatable({}, Player)
+   local math_random = math.random
+   self.pos_x = math_random(room[1] + 1, room[3] - 1) + .5
+   self.pos_y = math_random(room[2] + 1, room[4] - 1) + .5
    self.weapon = Weapon.new(0, 1, 1, 0, 0, 600, 20, -1, 1)
    return self
 end
@@ -886,8 +1035,8 @@ function Player:process(delta)
 
    local mouse_x, mouse_y, mouse_left, mouse_mid, mouse_right = table.unpack(g_mouse)
 
-   local pos_x_rel = mouse_x - 8 * self.pos_x
-   local pos_y_rel = mouse_y - 8 * self.pos_y
+   local pos_x_rel = mouse_x - 8 * (self.pos_x % 25)
+   local pos_y_rel = mouse_y - 8 * (self.pos_y % 17)
    self.angle = math.atan2(pos_y_rel, pos_x_rel)
 
    local mov_front = 0
@@ -908,6 +1057,9 @@ function Player:process(delta)
       local mov_scl = delta * self.speed / math.sqrt(mov_front * mov_front + mov_side * mov_side)
       self:move_abs(mov_side * mov_scl, mov_front * mov_scl)
    end
+
+   self.pos_x_scr = self.pos_x // 25
+   self.pos_y_scr = self.pos_y // 17
 
    if mouse_right and self.ping_cooldown == 0 and not g_mouse_prev[5] then
       self:ping()
@@ -947,7 +1099,8 @@ end
 -- 2: item pickup
 
 function init()
-   g_player = Player.new()
+   local start_room = g_map_gen()
+   g_player = Player.new(start_room)
    g_projs = {}
    g_hitmarks = {}
    g_enemies = {}
@@ -971,7 +1124,7 @@ function process_game(delta)
    local hitmarks = g_hitmarks
    local enemies = g_enemies
 
-   -- map(0, 0)
+   -- map(player.pos_x_scr * 25, player.pos_y_scr * 17)
    g_ui_render()
 
    -- Processes
