@@ -1109,6 +1109,7 @@ function init()
    g_t = time()
    g_mouse = table.pack(mouse())
    g_mouse_prev = {}
+   g_debug = true
 end
 
 function BOOT()
@@ -1124,7 +1125,9 @@ function process_game(delta)
    local hitmarks = g_hitmarks
    local enemies = g_enemies
 
-   -- map(player.pos_x_scr * 25, player.pos_y_scr * 17)
+   if g_debug then
+      map(player.pos_x_scr * 25, player.pos_y_scr * 17)
+   end
    g_ui_render()
 
    -- Processes
@@ -1223,7 +1226,9 @@ function TIC()
    -- Custom mouse sprite
    spr(257, v_mouse[1] - 4, v_mouse[2] - 4, 0)
 
-   print(string.format("FPS %d", math.floor(1000 / delta)), 0, 0, 5)
+   if g_debug then
+      print(string.format("FPS %d", math.floor(1000 / delta)), 0, 0, 5)
+   end
 end
 
 -- <TILES>
