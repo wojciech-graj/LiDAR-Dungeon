@@ -1295,6 +1295,7 @@ Player = {
    stats_flr = Stats.new(),
    stats_total = Stats.new(),
    floor = 1,
+   iframe_cooldown = 0,
 }
 Player.__index = Player
 
@@ -1323,8 +1324,10 @@ function Player:ping()
 end
 
 function Player:process(delta)
-   self.ping_cooldown = math.max(self.ping_cooldown - delta, 0)
+   local math_max = math.max
+   self.ping_cooldown = math_max(self.ping_cooldown - delta, 0)
    self.ping_passive_cooldown = self.ping_passive_cooldown - delta
+   self.iframe_cooldown = math_max(self.iframe_cooldown - delta, 0)
 
    if self.ping_passive_cooldown < 0 then
       self.ping_passive_cooldown = self.ping_cooldown_max
@@ -1385,13 +1388,18 @@ function Player:process(delta)
       g_state = 3
    end
 
-   g_draw_sprite(self.pos_x, self.pos_y, self.angle, 5)
+   if (self.iframe_cooldown // 100) % 2 == 0 then
+      g_draw_sprite(self.pos_x, self.pos_y, self.angle, 5)
+   end
 end
 
 function Player:damage(dmg)
-   self.health = self.health - dmg
-   self.stats_flr.damage_taken = self.stats_flr.damage_taken + dmg
-   self.stats_flr.bullets_taken = self.stats_flr.bullets_taken + 1
+   if self.iframe_cooldown == 0 then
+      self.health = self.health - dmg
+      self.stats_flr.damage_taken = self.stats_flr.damage_taken + dmg
+      self.stats_flr.bullets_taken = self.stats_flr.bullets_taken + 1
+      self.iframe_cooldown = 600
+   end
 end
 
 function Player:heal(amount)
