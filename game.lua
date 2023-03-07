@@ -144,18 +144,23 @@ end
 function g_draw_sprite(pos_x, pos_y, angle, color)
    local math_cos = math.cos
    local math_sin = math.sin
-   local pos_x_scl = (pos_x % 25) * 8
-   local pos_y_scl = (pos_y % 17) * 8
+   local player = g_player
 
-   tri(
-      pos_x_scl + 4 * math_cos(angle),
-      pos_y_scl + 4 * math_sin(angle),
-      pos_x_scl + 4 * math_cos(angle + 2.7),
-      pos_y_scl + 4 * math_sin(angle + 2.7),
-      pos_x_scl + 4 * math_cos(angle - 2.7),
-      pos_y_scl + 4 * math_sin(angle - 2.7),
-      color
-   )
+   if pos_x > player.pos_x_scr * 25 and pos_x < player.pos_x_scr * 25 + 25
+      and pos_y > player.pos_y_scr * 17 and pos_y < player.pos_y_scr * 17 + 17 then
+      local pos_x_scl = (pos_x % 25) * 8
+      local pos_y_scl = (pos_y % 17) * 8
+
+      tri(
+         pos_x_scl + 4 * math_cos(angle),
+         pos_y_scl + 4 * math_sin(angle),
+         pos_x_scl + 4 * math_cos(angle + 2.7),
+         pos_y_scl + 4 * math_sin(angle + 2.7),
+         pos_x_scl + 4 * math_cos(angle - 2.7),
+         pos_y_scl + 4 * math_sin(angle - 2.7),
+         color
+      )
+   end
 end
 
 --- Spawn explosion projectiles
@@ -759,33 +764,33 @@ function Weapon.new_random(target)
          math_random(10, 15),
          -1,
          2,
-         .005,
+         math_random() * .003 + .004,
          math_random() < .3
       )
    elseif wpn_type == 2 then -- shotgun
       return Weapon.new(0,
          target,
-         math_random(2, 4),
+         math_random(2, 3),
          math_random() * .9,
          math_random() * .5,
          math_random(1500, 2000),
          math_random(6, 9),
          -1,
          1,
-         .005,
+         math_random() * .002 + .003,
          math_random() < .1
       )
    elseif wpn_type == 3 then -- circle
       return Weapon.new(0,
          target,
-         math_random(4, 8),
-         3.14,
+         math_random(4, 6),
+         6.28,
          .2,
-         math_random(1500, 2000),
+         math_random(2000, 3000),
          math_random(6, 9),
          -1,
          1,
-         .005,
+         math_random() * .002 + .0015,
          math_random() < .1
       )
    else -- wpn_type == 4 -- rapid-fire
@@ -798,7 +803,7 @@ function Weapon.new_random(target)
          math_random(7, 11),
          -1,
          .5,
-         .005,
+         math_random() * .001 + .0035,
          math_random() < .5
       )
    end
@@ -813,7 +818,7 @@ function Weapon:fire(pos_x, pos_y, angle)
       self.cooldown = self.cooldown_max
       self.ammo = self.ammo - 1
       local math_random = math.random
-      local dangle = (self.spread * 2) / self.proj_cnt
+      local dangle = self.spread / self.proj_cnt
       local projs = g_projs
       local table_insert = table.insert
       for i = 1, self.proj_cnt do
@@ -872,8 +877,8 @@ function Enemy.new_random(pos_x, pos_y)
    return Enemy.new(
       pos_x,
       pos_y,
-      math_random() * .02 + .005,
-      math_random(5),
+      math_random() * .025 + .005,
+      math_random(5 + math.floor(g_player.floor * 2.5)),
       Weapon.new_random(0),
       math_random(3)
    )
@@ -1201,7 +1206,7 @@ Player = {
    move_abs = Entity.move_abs,
    move_rel = Entity.move_rel,
    health = 5,
-   speed = .005,
+   speed = .004,
    ping_cooldown_max = 400,
    can_bounce = false,
    stats_flr = Stats.new(),
@@ -1212,7 +1217,7 @@ Player.__index = Player
 
 function Player.new(room)
    local self = setmetatable({}, Player)
-   self.weapon = Weapon.new(0, 1, 1, 0, 0, 600, 20, -1, 1, .005)
+   self.weapon = Weapon.new(0, 1, 1, .5, .3, 600, 7, -1, 1, .005)
    self:place_in_room(room)
    return self
 end
@@ -1243,7 +1248,7 @@ function Player:process(delta)
       local table_insert = table.insert
       local projs = g_projs
       for theta = 0, 6.28, .1 do
-         table_insert(projs, Proj.new(self.pos_x, self.pos_y, self.angle + theta, .01, 1.5, self.can_bounce, 0))
+         table_insert(projs, Proj.new(self.pos_x, self.pos_y, self.angle + theta, .01, 2, self.can_bounce, 0))
       end
    end
 
@@ -1330,7 +1335,7 @@ function init()
    g_t = time()
    g_mouse = table.pack(mouse())
    g_mouse_prev = {}
-   g_debug = true
+   g_debug = false
 end
 
 function BOOT()
