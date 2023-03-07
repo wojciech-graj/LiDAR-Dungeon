@@ -46,6 +46,9 @@
 -- 16: Item
 -- 24: Inactive Enemy
 -- 32: Exit
+-- Temporary values:
+-- 128: Map filler
+-- 1: Map air filler
 
 ----------------------------------------
 -- utility functions -------------------
@@ -261,13 +264,13 @@ function g_dig_corridor(x, y, dx, dy)
       return
    end
 
-   while mget(x, y) ~= 0 do -- haven't reached open space
+   while mget(x, y) ~= 1 do -- haven't reached open space
       -- Dig
-      mset(x, y, 0)
-      if mget(x + dy, y + dx) ~= 0 then
+      mset(x, y, 1)
+      if mget(x + dy, y + dx) ~= 1 then
          mset(x + dy, y + dx, 8)
       end
-      if mget(x - dy, y - dx) ~= 0 then
+      if mget(x - dy, y - dx) ~= 1 then
          mset(x - dy, y - dx, 8)
       end
 
@@ -301,8 +304,8 @@ end
 --- Generates map
 function g_map_gen()
    -- Clear map
-   for x = 0, 200 do
-      for y = 0, 119 do
+   for x = 0, 199 do
+      for y = 0, 118 do
          mset(x, y, 128)
       end
    end
@@ -345,7 +348,7 @@ function g_map_gen()
             end
             for y = rsy + 1, rey - 1 do
                for x = rsx + 1, rex - 1 do
-                  mset(x, y, 0)
+                  mset(x, y, 1)
                end
             end
 
@@ -381,9 +384,47 @@ function g_map_gen()
       dig_corridor(sx + math_random(ex - sx - 2), sy, 0, -1)
    end
 
-   local start_room = table_remove(rooms, math.random(#rooms))
+   -- Flood-fill air placeholder with air
+   local room = rooms[1]
+   local x = room[1] + 1
+   local y = room[2] + 1
+   local stack = {{x, y}}
+   while #stack > 0 do
+      local x, y = table_unpack(table_remove(stack))
+      if mget(x, y) == 1 then
+         mset(x, y, 0)
+         table_insert(stack, {x - 1, y})
+         table_insert(stack, {x + 1, y})
+         table_insert(stack, {x, y - 1})
+         table_insert(stack, {x, y + 1})
+      end
+   end
 
-   -- TODO: verify only one graph containing all rooms
+   -- Count disconnected tiles and fill
+   local discon_cnt = 0
+   for x = 0, 199 do
+      for y = 0, 118 do
+         if mget(x, y) == 1 then
+            discon_cnt = discon_cnt + 1
+            mset(x, y, 8)
+         end
+      end
+   end
+
+   -- Re-do generation if too many disconnected tiles
+   if discon_cnt > 363 then
+      return g_map_gen()
+   end
+
+   -- Cull invalid rooms
+   for k, v in pairs(rooms) do
+      if mget(v[1], v[2]) ~= 1 then
+         table_remove(rooms, k)
+      end
+   end
+
+   local start_room = table_remove(rooms, math_random(#rooms))
+
    -- TODO: place items, enemies, and exits
 
    return start_room
