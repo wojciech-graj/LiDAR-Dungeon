@@ -301,6 +301,18 @@ function g_dig_corridor(x, y, dx, dy)
    end
 end
 
+--- Places a tile cnt times in a room
+function g_map_place_rand(room, tile, cnt)
+   local math_random = math.random
+   for _ = 1, cnt do
+      mset(
+         math_random(room[1] + 2, room[3] - 2),
+         math_random(room[2] + 2, room[4] - 2),
+         tile
+      )
+   end
+end
+
 --- Generates map
 function g_map_gen()
    -- Clear map
@@ -404,7 +416,10 @@ function g_map_gen()
    local discon_cnt = 0
    for x = 0, 199 do
       for y = 0, 118 do
-         if mget(x, y) == 1 then
+         local tile_data = mget(x, y)
+         if tile_data == 128 then
+            mset(x, y, 8)
+         elseif tile_data == 1 then
             discon_cnt = discon_cnt + 1
             mset(x, y, 8)
          end
@@ -417,15 +432,29 @@ function g_map_gen()
    end
 
    -- Cull invalid rooms
-   for k, v in pairs(rooms) do
-      if mget(v[1], v[2]) ~= 1 then
-         table_remove(rooms, k)
+   if discon_cnt > 0 then
+      for k, v in pairs(rooms) do
+         if mget(v[1], v[2]) ~= 1 then
+            table_remove(rooms, k)
+         end
       end
    end
 
    local start_room = table_remove(rooms, math_random(#rooms))
 
-   -- TODO: place items, enemies, and exits
+   local map_place_rand = g_map_place_rand
+
+   -- Place items, enemies
+   for _, room in pairs(rooms) do
+      map_place_rand(room, 8, math_random(3) - 1)
+      map_place_rand(room, 16, math_random() < .3 and 1 or 0)
+      map_place_rand(room, 24, math_random(5) - 1)
+   end
+
+   -- Place exits
+   for i = 1, 2 do
+      map_place_rand(rooms[math_random(#rooms)], 32, 1)
+   end
 
    return start_room
 end
@@ -520,7 +549,7 @@ function Item.new(type_idx)
          local spread = math_random(1000) / 1000
          local cooldown = math_random(600, 1500)
          local speed = (cooldown - 600) // 300 + 1
-         self.data = Weapon.new(self.type_idx - 3, 1, bullet_cnt, spread, .1, cooldown, 20, -1, damage)
+         self.data = Weapon.new(self.type_idx - 3, 1, bullet_cnt, spread, .1, cooldown, 20, -1, damage, .005)
          self.desc = string.format("%dBUL %dDMG\n%sSPR %sSPD", bullet_cnt, damage, math.floor(spread * 3), speed)
       elseif self.subtype_idx == 2 then
          self.data = math_random(2)
@@ -681,11 +710,12 @@ Weapon = {
    cooldown_max = 0,
    range = 0,
    ammo = 0,
+   speed = 0,
    can_bounce = false,
 }
 Weapon.__index = Weapon
 
-function Weapon.new(proj_type, target, proj_cnt, spread, accuracy, cooldown, range, ammo, damage, can_bounce)
+function Weapon.new(proj_type, target, proj_cnt, spread, accuracy, cooldown, range, ammo, damage, speed, can_bounce)
    local self = setmetatable({}, Weapon)
    self.proj_type = proj_type
    self.target = target
@@ -696,8 +726,67 @@ function Weapon.new(proj_type, target, proj_cnt, spread, accuracy, cooldown, ran
    self.range = range
    self.ammo = ammo
    self.damage = damage
+   self.speed = speed
    self.can_bounce = can_bounce or false
    return self
+end
+
+function Weapon.new_random(target)
+   local math_random = math.random
+   local wpn_type = math_random(4)
+   if wpn_type == 1 then -- gun
+      return Weapon.new(0,
+         target,
+         1,
+         0,
+         math_random() * .5,
+         math_random(1000, 1500),
+         math_random(10, 15),
+         -1,
+         2,
+         .005,
+         math_random() < .3
+      )
+   elseif wpn_type == 2 then -- shotgun
+      return Weapon.new(0,
+         target,
+         math_random(2, 4),
+         math_random() * .9,
+         math_random() * .5,
+         math_random(1500, 2000),
+         math_random(6, 9),
+         -1,
+         1,
+         .005,
+         math_random() < .1
+      )
+   elseif wpn_type == 3 then -- circle
+      return Weapon.new(0,
+         target,
+         math_random(4, 8),
+         3.14,
+         .2,
+         math_random(1500, 2000),
+         math_random(6, 9),
+         -1,
+         1,
+         .005,
+         math_random() < .1
+      )
+   else -- wpn_type == 4 -- rapid-fire
+      return Weapon.new(0,
+         target,
+         1,
+         0,
+         .4,
+         math_random(500, 900),
+         math_random(7, 11),
+         -1,
+         .5,
+         .005,
+         math_random() < .5
+      )
+   end
 end
 
 function Weapon:process(delta)
@@ -713,7 +802,7 @@ function Weapon:fire(pos_x, pos_y, angle)
       local projs = g_projs
       local table_insert = table.insert
       for i = 0, self.proj_cnt - 1 do
-         table_insert(projs, Proj.new(pos_x, pos_y, angle - self.spread + dangle * i + (2 * math.random() - 1) * self.accuracy, .01, 5, self.can_bounce, self.target + 1, self.damage))
+         table_insert(projs, Proj.new(pos_x, pos_y, angle - self.spread + dangle * i + (2 * math.random() - 1) * self.accuracy, self.speed, self.range, self.can_bounce, self.target + 1, self.damage))
       end
    end
 end
@@ -744,18 +833,30 @@ Enemy = {
 }
 Enemy.__index = Enemy
 
-function Enemy.new(pos_x, pos_y, speed, health, weapon)
+function Enemy.new(pos_x, pos_y, speed, health, weapon, ai_idx)
    local self = setmetatable({}, Enemy)
    self.pos_x = pos_x
    self.pos_y = pos_y
    self.speed = speed
    self.health = health
    self.weapon = weapon
-   self.ai_idx = math.random(3)
-   local enemies = g_enemies
+   weapon.cooldown = weapon.cooldown_max
+   self.ai_idx = ai_idx
    mset(pos_x, pos_y, 0)
    self:mark_area(true)
    return self
+end
+
+function Enemy.new_random(pos_x, pos_y)
+   local math_random = math.random
+   return Enemy.new(
+      pos_x,
+      pos_y,
+      math_random() * .02 + .005,
+      math_random(5),
+      Weapon.new_random(0),
+      math_random(3)
+   )
 end
 
 -- Calculate tiles within hitbox on an axis
@@ -801,11 +902,11 @@ function Enemy:process(delta)
       self.pos_x_player_last = player.pos_x
       self.pos_y_player_last = player.pos_y
       if dir_mag < 2 then
-         self.speed_fwd = -self.speed
+         speed_fwd = -self.speed
       elseif dir_mag > 3 then
-         self.speed_fwd = self.speed
+         speed_fwd = self.speed
       else
-         self.speed_fwd = 0
+         speed_fwd = 0
       end
       self.weapon:fire(self.pos_x, self.pos_y, self.angle)
    else
@@ -818,12 +919,12 @@ function Enemy:process(delta)
 
    if self.ai_idx == 1 then
    elseif self.ai_idx == 2 or self.ai_idx == 3 then
-      self.vel_side = self.vel_side + (math.random() - .5) * self.speed * .3
+      self.vel_side = self.vel_side + (math.random() - .5) * self.speed * .2
       if self.ai_idx == 3 then
-         self.speed_fwd = self.speed_fwd + (math.random() - .5) * self.vel_side
+         speed_fwd = speed_fwd + (math.random() - .5) * self.vel_side * 2
       end
    end
-   self:move_rel(self.speed_fwd, self.vel_side)
+   self:move_rel(speed_fwd, self.vel_side)
 
    self:mark_area(true)
 end
@@ -835,6 +936,10 @@ function Enemy:damage(dmg)
       local math_random = math.random
       for i = 0, 5 do
          explode(self.pos_x + math_random() - .5, self.pos_y + math_random() - .5)
+      end
+      self:mark_area(false)
+      if math_random() < .2 then
+         mset(self.pos_x, self.pos_y, 16)
       end
       return true
    end
@@ -960,6 +1065,7 @@ function Proj:process(delta)
       if self.type_idx == 0 then -- ping
          local tile_data = mget(self.pos_x, self.pos_y)
          local tile = tile_data & 0x38
+         -- Show item or exit
          if tile == 16 or tile == 32 then -- item or exit
             local math_floor = math.floor
             local pos_x_floor = math_floor(self.pos_x)
@@ -973,12 +1079,13 @@ function Proj:process(delta)
                (tile == 16) and 1 or 2
             ))
             return false
+         -- Spawn Enemy
          elseif tile_data == 24 then
             local math_floor = math.floor
             local pos_x_floor = math_floor(self.pos_x)
             local pos_y_floor = math_floor(self.pos_y)
-            table.insert(g_enemies, Enemy.new(pos_x_floor + .5, pos_y_floor + .5, .01, 4,
-               Weapon.new(0, 0, 2, .2, .4, 1300, 7, -1, 1)))
+
+            table.insert(g_enemies, Enemy.new_random(pos_x_floor + .5, pos_y_floor + .5))
             return false
          end
       end
@@ -1047,7 +1154,7 @@ function Player.new(room)
    local math_random = math.random
    self.pos_x = math_random(room[1] + 1, room[3] - 1) + .5
    self.pos_y = math_random(room[2] + 1, room[4] - 1) + .5
-   self.weapon = Weapon.new(0, 1, 1, 0, 0, 600, 20, -1, 1)
+   self.weapon = Weapon.new(0, 1, 1, 0, 0, 600, 20, -1, 1, .005)
    return self
 end
 
