@@ -654,7 +654,7 @@ function Item:apply()
       elseif self.subtype_idx == 6 then
          player.weapon.range = player.weapon.range + self.data
       else -- self.subtype_idx == 7
-         playper.weapon.can_bounce = true
+         player.weapon.can_bounce = true
       end
    else -- self.type_idx == 5
       player:heal(self.data)
