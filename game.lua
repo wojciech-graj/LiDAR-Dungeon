@@ -244,15 +244,38 @@ end
 
 --- Print rainbow text that bobs up and down
 -- @param text table: table of characters to print
-function g_print_rainbow(text, pos_x, pos_y)
+-- @param start int: color on which to start
+-- @param range int: no. colors to include in rainbow
+function g_print_rainbow(text, pos_x, pos_y, start, range)
    local t = g_t
    local color_start = t // 70
    local offset_y = t / 100
    local math_sin = math.sin
 
    for k, v in ipairs(text) do
-      print(v, pos_x + 6 * k, pos_y + math_sin(offset_y + k * .7), color_start + k, true)
+      print(v, pos_x + 6 * k, pos_y + math_sin(offset_y + k * .7), (color_start + k) % range + start, true)
    end
+end
+
+--- Print stats
+-- @param floors int or nil
+function g_print_stats(stats, pos_x, pos_y, floors)
+   local string_format = string.format
+
+   if floors then
+      print(string_format("Floors Cleared.....%d", floors), pos_x, pos_y, 13, true, 1, true)
+      pos_y = pos_y + 8
+   end
+
+   print(string_format("Damage Taken.......%.1f", stats.damage_taken), pos_x, pos_y, 13, true, 1, true)
+   print(string_format("Damage Dealt.......%.1f", stats.damage_dealt), pos_x, pos_y + 8, 13, true, 1, true)
+   print(string_format("Bullets Fired......%d", stats.bullets_fired), pos_x, pos_y + 16, 13, true, 1, true)
+   print(string_format("Accuracy...........%.1f", 100 * stats.bullets_hit / stats.bullets_fired), pos_x, pos_y + 24, 13, true, 1, true)
+   print(string_format("Bullets Taken......%d", stats.bullets_taken), pos_x, pos_y + 32, 13, true, 1, true)
+   print(string_format("Scans Performed....%d", stats.pings), pos_x, pos_y + 40, 13, true, 1, true)
+   print(string_format("Upgrades Obtained..%d", stats.items_collected), pos_x, pos_y + 48, 13, true, 1, true)
+   print(string_format("Enemies Destroyed..%d", stats.enemies_destroyed), pos_x, pos_y + 56, 13, true, 1, true)
+   print(string_format("Distance Travelled.%d", math.floor(stats.distance_travelled)), pos_x, pos_y + 64, 13, true, 1, true)
 end
 
 ----------------------------------------
@@ -1398,6 +1421,11 @@ function Player:damage(dmg)
       self.health = self.health - dmg
       self.stats_flr.damage_taken = self.stats_flr.damage_taken + dmg
       self.stats_flr.bullets_taken = self.stats_flr.bullets_taken + 1
+      if self.health < 0 then
+         self.health = 0
+         self.stats_total:add(self.stats_flr)
+         g_state = 4
+      end
       self.iframe_cooldown = 600
    end
 end
@@ -1414,6 +1442,7 @@ end
 -- 1: game
 -- 2: item pickup
 -- 3: floor clear
+-- 4: game over
 
 function init()
    local start_room = g_map_gen()
@@ -1422,15 +1451,15 @@ function init()
    g_hitmarks = {}
    g_enemies = {}
    g_state = 1
+end
+
+function BOOT()
+   init()
    g_items = {}
    g_t = time()
    g_mouse = table.pack(mouse())
    g_mouse_prev = {}
    g_debug = false
-end
-
-function BOOT()
-   init()
    g_prev_time = time()
 end
 
@@ -1475,7 +1504,7 @@ function process_item_pickup(delta)
 
    map(210, 0, 18, 15, 28, 8)
    print("SKIP", 88, 106, 2, true)
-   g_print_rainbow(gc_upgrade_text_tab, 73, 10)
+   g_print_rainbow(gc_upgrade_text_tab, 73, 10, 0, 16)
 
    local items = g_items
    items[1]:render(52, 32)
@@ -1507,44 +1536,33 @@ function process_floor_clear(delta)
 
    map(210, 68, 16, 15, 36, 8)
    print("CONTINUE", 77, 106, 6, true)
-   g_print_rainbow(g_floor_clear_text_tab, 55, 10)
+   g_print_rainbow(g_floor_clear_text_tab, 55, 10, 0, 16)
 
    g_ui_render()
 
-   local string_format = string.format
    local player = g_player
-   local stats = player.stats_flr
 
-   print(string_format("Damage Taken.......%.1f", stats.damage_taken), 56, 24, 13, true, 1, true)
-   print(string_format("Damage Dealt.......%.1f", stats.damage_dealt), 56, 32, 13, true, 1, true)
-   print(string_format("Bullets Fired......%d", stats.bullets_fired), 56, 40, 13, true, 1, true)
-   print(string_format("Accuracy...........%.1f", 100 * stats.bullets_hit / stats.bullets_fired), 56, 48, 13, true, 1, true)
-   print(string_format("Bullets Taken......%d", stats.bullets_taken), 56, 56, 13, true, 1, true)
-   print(string_format("Scans Performed....%d", stats.pings), 56, 64, 13, true, 1, true)
-   print(string_format("Upgrades Obtained..%d", stats.items_collected), 56, 72, 13, true, 1, true)
-   print(string_format("Enemies Destroyed..%d", stats.enemies_destroyed), 56, 80, 13, true, 1, true)
-   print(string_format("Distance Travelled.%d", math.floor(stats.distance_travelled)), 56, 88, 13, true, 1, true)
+   g_print_stats(player.stats_flr, 56, 24)
 
    -- Check for selection
    local mouse_x, mouse_y, mouse_left = table.unpack(g_mouse)
-   if mouse_left and not g_mouse_prev[3] then
-      if mouse_y >= 104 and mouse_y <= 112
-         and mouse_x >= 68 and mouse_x <= 132 then
-         player.floor = player.floor + 1
-         g_state = 1
-         g_projs = {}
-         g_hitmarks = {}
-         g_enemies = {}
-         if player.floor % 2 == 1 then
-            local start_room = g_map_gen()
-            g_player:place_in_room(start_room)
-            mset(220, 127, 40)
-            mset(211, 127, 0)
-         else -- boss fight
-            local player = g_player
-            player.pos_x = 201
-            player.pos_y = 127
-         end
+   if mouse_left and not g_mouse_prev[3]
+      and mouse_y >= 104 and mouse_y <= 112
+      and mouse_x >= 68 and mouse_x <= 132 then
+      player.floor = player.floor + 1
+      g_state = 1
+      g_projs = {}
+      g_hitmarks = {}
+      g_enemies = {}
+      if player.floor % 2 == 1 then
+         local start_room = g_map_gen()
+         g_player:place_in_room(start_room)
+         mset(220, 127, 40)
+         mset(211, 127, 0)
+      else -- boss fight
+         local player = g_player
+         player.pos_x = 201
+         player.pos_y = 127
       end
    end
 end
@@ -1552,6 +1570,32 @@ g_floor_clear_text_tab = {
    "F", "L", "O", "O", "R",
    " ", 0,
    " ", "C", "L", "E", "A", "R"
+}
+
+function process_game_end(delta)
+   cls()
+
+   map(210, 68, 16, 15, 36, 8)
+   print("NEW RUN", 80, 106, 6, true)
+   g_print_rainbow(g_game_over_text_tab, 68, 10, 2, 1)
+
+   g_ui_render()
+
+   local player = g_player
+
+   g_print_stats(player.stats_total, 56, 20, player.floor - 1)
+
+   -- Check for selection
+   local mouse_x, mouse_y, mouse_left = table.unpack(g_mouse)
+   if mouse_left and not g_mouse_prev[3]
+      and mouse_y >= 104 and mouse_y <= 112
+      and mouse_x >= 68 and mouse_x <= 132 then
+      init()
+   end
+end
+g_game_over_text_tab = {
+   "G", "A", "M", "E",
+   " ", "O", "V", "E", "R"
 }
 
 function TIC()
@@ -1573,8 +1617,10 @@ function TIC()
       process_game(delta)
    elseif state == 2 then
       process_item_pickup(delta)
-   else -- state == 3
+   elseif state == 3 then
       process_floor_clear(delta)
+   else -- state == 4
+      process_game_end(delta)
    end
 
    -- Custom mouse sprite
