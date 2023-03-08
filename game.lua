@@ -1039,6 +1039,8 @@ function Enemy:damage(dmg)
       local explode = g_explode
       local math_random = math.random
 
+      self:mark_area(false)
+
       local explosion_cnt
       local explosion_spread
       if self.ai_idx == 5 then
@@ -1049,24 +1051,25 @@ function Enemy:damage(dmg)
          for i = 1, math_random(3) + 2 do
             local pos_x = self.pos_x + math_random(3) - 2
             local pos_y = self.pos_y + math_random(3) - 2
-            if mget(pos_x, pos_y) == 0 then
-               mset(pos_x, pos_y, 16)
+            local tile_data = mget(pos_x, pos_y)
+            if tile_data < 8 then
+               mset(pos_x, pos_y, tile_data + 16)
             end
          end
 
-         mset(211, 127, 32) -- Place exit
+         mset(211, 127, mget(211, 127) + 32) -- Place exit
       else
          explosion_cnt = 5
          explosion_spread = 1
-         if math_random() < .2 then
-            mset(self.pos_x, self.pos_y, 16)
+         local tile_data = mget(self.pos_x, self.pos_y)
+         if math_random() < .2 and tile_data < 8 then
+            mset(self.pos_x, self.pos_y, tile_data + 16)
          end
       end
+
       for i = 1, explosion_cnt do
          explode(self.pos_x + (math_random() - .5) * explosion_spread, self.pos_y + (math_random() - .5) * explosion_spread)
       end
-
-      self:mark_area(false)
 
       local player = g_player
       player.stats_flr.enemies_destroyed = player.stats_flr.enemies_destroyed + 1
@@ -1550,11 +1553,10 @@ function process_floor_clear(delta)
       and mouse_y >= 104 and mouse_y <= 112
       and mouse_x >= 68 and mouse_x <= 132 then
       player.floor = player.floor + 1
-      g_state = 1
-      g_projs = {}
-      g_hitmarks = {}
-      g_enemies = {}
       if player.floor % 2 == 1 then
+         for _, v in pairs(g_enemies) do
+            v:damage(1e9)
+         end
          local start_room = g_map_gen()
          g_player:place_in_room(start_room)
          mset(220, 127, 40)
@@ -1564,6 +1566,10 @@ function process_floor_clear(delta)
          player.pos_x = 201
          player.pos_y = 127
       end
+      g_enemies = {}
+      g_projs = {}
+      g_state = 1
+      g_hitmarks = {}
    end
 end
 g_floor_clear_text_tab = {
