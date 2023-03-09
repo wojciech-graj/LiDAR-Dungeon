@@ -616,13 +616,13 @@ function Item.new()
       local roll = math_random()
       if roll < .05 then
          self.subtype_idx = 1
-         local bullet_cnt = math_random(2)
+         local bullet_cnt = player.weapon.proj_cnt
          local damage = player.weapon.damage + (math_random() - .5)
          local spread = math_random(1000) / 1000
          local cooldown = math_random(600, 1500)
          local speed = (cooldown - 600) // 300 + 1
          self.data = Weapon.new(self.type_idx - 3, 1, bullet_cnt, spread, .1, cooldown, 20, -1, damage, .005)
-         self.desc = string.format("%dBUL %dDMG\n%sSPR %sSPD", bullet_cnt, math.min(1, math.floor(damage)), math.floor(spread * 3), speed)
+         self.desc = string.format("%dBUL %dDMG\n%sSPR %sSPD", bullet_cnt, math.max(1, math.floor(damage)), math.floor(spread * 9), speed)
       else
          self.type_idx = player.weapon.proj_type + 3
          if roll < .1 then
@@ -1141,6 +1141,7 @@ end
 -- 2: player's bullet
 -- 3: explosion
 -- 4: homing enemy's bullet
+-- 5: homing player's bullet
 
 --- Projectile
 Proj = {
@@ -1196,10 +1197,10 @@ function Proj:process(delta)
 
          -- Homing
          if self.type_idx == 4 then
-            local own_angle = math.atan2(self.dir_y, self.dir_x)
-            local tgt_angle = math.atan2(rel_pos_y, rel_pos_x)
-            local dangle = math.min(math.max(-.015, tgt_angle - own_angle), .015)
-            own_angle = own_angle + dangle
+            local tgt_angle = math.atan2(rel_pos_x * self.dir_y - rel_pos_y * self.dir_x,
+               self.dir_x * rel_pos_x + self.dir_y * rel_pos_y)
+            local dangle = math.min(math.max(-.015, tgt_angle), .015)
+            local own_angle = math.atan2(self.dir_y, self.dir_x) - dangle
             self.dir_x = math.cos(own_angle)
             self.dir_y = math.sin(own_angle)
          end
@@ -1212,7 +1213,20 @@ function Proj:process(delta)
             player:damage(self.damage)
             return true
          end
-      elseif self.type_idx == 0 or self.type_idx == 2 then -- player's projectile or ping
+      elseif self.type_idx == 0 or self.type_idx == 2 or self.type_idx == 5 then -- player's projectile or ping
+         -- Homing
+         if self.type_idx == 5 then
+            local mouse_x, mouse_y = table.unpack(g_mouse)
+            local rel_pos_x = mouse_x / 8 - self.pos_x
+            local rel_pos_y = mouse_y / 8- self.pos_y
+            local tgt_angle = math.atan2(rel_pos_x * self.dir_y - rel_pos_y * self.dir_x,
+               self.dir_x * rel_pos_x + self.dir_y * rel_pos_y)
+            local dangle = math.min(math.max(-.015, tgt_angle), .015)
+            local own_angle = math.atan2(self.dir_y, self.dir_x) - dangle
+            self.dir_x = math.cos(own_angle)
+            self.dir_y = math.sin(own_angle)
+         end
+
          if mget(self.pos_x, self.pos_y) & 0x7 > 0 then -- on tile containing enemy
             local enemies = g_enemies
             local ray_circ_collides = g_ray_circ_collides
@@ -1499,10 +1513,12 @@ end
 function init()
    local start_room = g_map_gen()
    g_player = Player.new(start_room)
+   g_comp_pos_x = 0
+   g_comp_pos_y = 0
    g_projs = {}
    g_hitmarks = {}
    g_enemies = {}
-   g_state = 3
+   g_state = 1
 end
 
 function BOOT()
