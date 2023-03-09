@@ -506,9 +506,10 @@ function g_map_gen()
       end
    end
 
-   local start_room = table_remove(rooms, math_random(#rooms))
-
    local map_place_rand = g_map_place_rand
+
+   local start_room = table_remove(rooms, math_random(#rooms))
+   map_place_rand(start_room, 16, 3)
 
    -- Place items, enemies
    for _, room in pairs(rooms) do
@@ -677,7 +678,7 @@ function Item:apply()
       elseif self.subtype_idx == 2 then
          player.ping_spread = player.ping_spread + self.data
       elseif self.subtype_idx == 3 then
-         player.ping_cooldown_max = player.ping_cooldown_max - self.data
+         player.ping_cooldown_max = math.max(player.ping_cooldown_max - self.data, 100)
       else -- self.subtype_idx == 4
          player.ping_bounces = player.ping_bounces + 1
          player.ping_range = player.ping_range * (1 - self.data)
@@ -693,7 +694,7 @@ function Item:apply()
       elseif self.subtype_idx == 4 then
          player.weapon.spread = player.weapon.spread + self.data
       elseif self.subtype_idx == 5 then
-         player.weapon.cooldown_max = player.weapon.cooldown_max - self.data
+         player.weapon.cooldown_max = math.max(player.weapon.cooldown_max - self.data, 100)
       elseif self.subtype_idx == 6 then
          player.weapon.range = player.weapon.range + self.data
       else -- self.subtype_idx == 7
@@ -1373,12 +1374,12 @@ Player = {
    ping_cooldown = 0,
    ping_passive_cooldown = 0,
    ping_spread = 1,
-   ping_range = 10,
+   ping_range = 8,
    weapon = nil,
    move_abs = Entity.move_abs,
    move_rel = Entity.move_rel,
    health = 5,
-   speed = .004,
+   speed = .0035,
    ping_cooldown_max = 400,
    ping_bounces = 0,
    stats_flr = Stats.new(),
@@ -1476,10 +1477,6 @@ function Player:process(delta)
       g_floor_clear_text_tab[7] = self.floor
       g_state = 3
    end
-
-   if (self.iframe_cooldown // 100) % 2 == 0 then
-      g_draw_sprite(self.pos_x, self.pos_y, self.angle, 5)
-   end
 end
 
 function Player:damage(dmg)
@@ -1498,6 +1495,12 @@ end
 
 function Player:heal(amount)
    self.health = math.min(self.health + amount, 7)
+end
+
+function Player:draw()
+   if (self.iframe_cooldown // 100) % 2 == 0 then
+      g_draw_sprite(self.pos_x, self.pos_y, self.angle, 5)
+   end
 end
 
 ----------------------------------------
@@ -1565,6 +1568,8 @@ function process_game(delta)
    for k, v in pairs(enemies) do
       v:process(delta)
    end
+
+   player:draw()
 end
 
 function process_item_pickup(delta)
