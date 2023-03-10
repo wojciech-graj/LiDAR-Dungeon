@@ -830,10 +830,10 @@ function Weapon.new_random(target)
          1,
          0,
          math_random() * .5,
-         math_random(1000, 1500),
+         math_random(800, 1300),
          math_random(10, 15),
          -1,
-         2,
+         math_random() + .5,
          math_random() * .003 + .004,
          math_random() < .3 and 3 or 1
       )
@@ -843,7 +843,7 @@ function Weapon.new_random(target)
          math_random(2, 3),
          math_random() * .9,
          math_random() * .5,
-         math_random(1500, 2000),
+         math_random(1000, 1500),
          math_random(6, 9),
          -1,
          1,
@@ -855,8 +855,8 @@ function Weapon.new_random(target)
          target,
          math_random(4, 6),
          3.14,
-         .2,
-         math_random(2000, 3000),
+         .3,
+         math_random(1000, 1200),
          math_random(6, 9),
          -1,
          1,
@@ -1113,6 +1113,7 @@ function Enemy:damage(dmg)
             end
          end
 
+         sfx(22)
          g_exit_spawn(211, 127)
       else
          explosion_cnt = 5
@@ -1393,8 +1394,8 @@ Player = {
    speed = .0035,
    ping_cooldown_max = 400,
    ping_bounces = 0,
-   stats_flr = Stats.new(),
-   stats_total = Stats.new(),
+   stats_flr = nil,
+   stats_total = nil,
    floor = 1,
    iframe_cooldown = 0,
 }
@@ -1403,6 +1404,8 @@ Player.__index = Player
 function Player.new(room)
    local self = setmetatable({}, Player)
    self.weapon = Weapon.new(0, 1, 1, .3, .15, 600, 7, -1, 1, .005)
+   self.stats_flr = Stats.new()
+   self.stats_total = Stats.new()
    self:place_in_room(room)
    mset(self.pos_x, self.pos_y, 0)
    return self
@@ -1503,6 +1506,7 @@ function Player:damage(dmg)
          g_state = 4
       end
       self.iframe_cooldown = 600
+      g_screen_shake_timer = 0
    end
 end
 
@@ -1536,6 +1540,7 @@ function init()
    g_hitmarks = {}
    g_enemies = {}
    g_state = 5
+   g_screen_shake_timer = 1e9
 end
 
 function BOOT()
@@ -1556,6 +1561,15 @@ function process_game(delta)
    local projs = g_projs
    local hitmarks = g_hitmarks
    local enemies = g_enemies
+
+   if g_screen_shake_timer < 450 then
+      local screen_shake_timer = g_screen_shake_timer
+      local math_random = math.random
+      g_screen_shake_timer = screen_shake_timer + delta
+      poke(0x3FF9, (math_random() - .5) * (600 - screen_shake_timer) * .05)
+      poke(0x3FFA, (math_random() - .5) * (600 - screen_shake_timer) * .05)
+      poke(0x3FF8, math_random(4))
+   end
 
    if g_debug then
       map(player.pos_x_scr * 25, player.pos_y_scr * 17)
@@ -1769,6 +1783,11 @@ function TIC()
 
    -- Hide mouse
    poke(0x3FFB, 0)
+
+   -- Reset screen shake
+   poke(0x3FF9, 0)
+   poke(0x3FFA, 0)
+   poke(0x3FF8, 0)
 
    -- process
    local state = g_state
@@ -2072,6 +2091,7 @@ end
 -- 019:631063106310632063206330634063606370639063b063c063c063a06390738083609340a330b310c300d300e300e300f300f300f300f300f300f300005000000000
 -- 020:9140910091d0f100f100f100f100f100f100f100f100f100f100f100f100f100f100f100f100f100f100f100f100f100f100f100f100f100f100f10070b000000000
 -- 021:510051005100510051005100510051005100519051905190519051905190519051905190519061906190719081909190a190b190c190d190e190f190500000000000
+-- 022:03f013c023c023b023a023a0339033903380338043804370537063606360735073508350834093409330a330b320b320c310d310d310e310f300f300065000000000
 -- </SFX>
 
 -- <PATTERNS>
