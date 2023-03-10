@@ -1,7 +1,7 @@
 -- title:   LiDAR Dungeon
 -- author:  Wojciech Graj
--- desc:    TODO
--- site:    TODO
+-- desc:    A Bullet-Hell Roguelike made for 7DRL2023
+-- site:    https://github.com/wojciech-graj/LiDAR-Dungeon
 -- license: AGPL-3.0-or-later
 -- version: 0.0
 -- script:  lua
@@ -300,7 +300,7 @@ end
 function g_exit_spawn(tile_x, tile_y)
    g_comp_pos_x = tile_x + .5
    g_comp_pos_y = tile_y + .5
-   mset(tile_x, tile_y, mget(tile_x, tile_x) & 0x7 + 32)
+   mset(tile_x, tile_y, (mget(tile_x, tile_y) & 0x7) + 32)
 end
 
 function g_pix_menu(pos_x, pos_y, color)
@@ -528,7 +528,9 @@ function g_map_gen()
    repeat
       exit_room = rooms[math_random(#rooms)]
    until ((start_room[1] - exit_room[1]) ^ 2 + (start_room[2] - exit_room[2]) ^ 2 > 70)
-   g_exit_spawn(math_random(exit_room[1] + 2, exit_room[3] - 2), math_random(room[2] + 2, room[4] - 2))
+   g_exit_spawn(math_random(exit_room[1] + 2, exit_room[3] - 2),
+      math_random(exit_room[2] + 2, exit_room[4] - 2)
+   )
 
    return start_room
 end
@@ -625,8 +627,8 @@ function Item.new()
          local bullet_cnt = player.weapon.proj_cnt
          local damage = player.weapon.damage + (math_random() - .5)
          local spread = math_random(1000) / 1000
-         local cooldown = math_random(600, 1500)
-         local speed = (cooldown - 600) // 300 + 1
+         local cooldown = math_random(500, 1000)
+         local speed = (cooldown - 500) // 250 + 1
          self.data = Weapon.new(self.type_idx - 3, 1, bullet_cnt, spread, .1, cooldown, 20, -1, damage, .005)
          self.desc = string.format("%dBUL %dDMG\n%sSPR %sSPD", bullet_cnt, math.max(1, math.floor(damage)), math.floor(spread * 9), speed)
       else
@@ -659,7 +661,7 @@ function Item.new()
          end
       end
    else -- self.type_idx == 5
-      self.data = math_random(3)
+      self.data = math_random(3) + 1
       self.desc = string.format("+%d\nHEALTH", self.data)
    end
 
@@ -844,8 +846,8 @@ function Weapon.new_random(target)
          math_random(10, 15),
          -1,
          math_random() + .5,
-         math_random() * .003 + .004,
-         math_random() < .3 and 3 or 1
+         math_random() * .002 + .004,
+         math_random() < .5 and 2 or 0
       )
    elseif wpn_type == 2 then -- shotgun
       return Weapon.new(0,
@@ -858,7 +860,7 @@ function Weapon.new_random(target)
          -1,
          1,
          math_random() * .002 + .003,
-         math_random() < .1 and 3 or 1
+         math_random() < .1 and 3 or ((math_random() < .5) and 1 or 0)
       )
    elseif wpn_type == 3 then -- circle
       return Weapon.new(0,
@@ -879,12 +881,12 @@ function Weapon.new_random(target)
          1,
          0,
          .4,
-         math_random(500, 900),
+         math_random(300, 700),
          math_random(7, 11),
          -1,
          .5,
-         math_random() * .001 + .0035,
-         math_random() < .5 and 1 or 0
+         math_random() * .001 + .0032,
+         math_random() < .1 and 1 or 0
       )
    end
 end
@@ -952,8 +954,8 @@ function Enemy.new(pos_x, pos_y, speed, health, weapon, ai_idx, loot_chance)
    self.health = health
    self.weapon = weapon
    self.ai_idx = ai_idx
-   self.loot_chance = loot_chance or .25
-   mset(pos_x, pos_y, 0)
+   self.loot_chance = loot_chance or .33
+   mset(pos_x, pos_y, mget(pos_x, pos_y) & 0x7)
    self:mark_area(true)
    return self
 end
@@ -982,9 +984,9 @@ function Enemy.new_boss(pos_x, pos_y)
    )
    self.b_ai_timer = 0
    self.b_weapons = {
-      Weapon.new(0, 0, 8, 3.14, .4, 900, 17, -1, 1, .005, 3),
+      Weapon.new(0, 0, 6, 3.14, .4, 900, 17, -1, 1, .005, 2),
       Weapon.new(0, 0, 9, 1.5, .3, 750, 12, -1, 1, .006),
-      Weapon.new(1, 0, 1, 0, .2, 250, 15, -1, 1, .008),
+      Weapon.new(1, 0, 1, 0, .8, 350, 15, -1, 1, .008),
    }
    return self
 end
@@ -1082,13 +1084,13 @@ function Enemy:process(delta)
          weapon:process(delta)
          weapon:fire(self.pos_x, self.pos_y, self.angle)
       else -- ai_state == 3
-         if #g_enemies < 7 and math.random() < .05 then
+         if #g_enemies < 4 and math.random() < .05 then
             local math_random = math.random
             table.insert(g_enemies, Enemy.new(self.pos_x,
                   self.pos_y,
                   .02,
                   1,
-                  Weapon.new(1, 0, 1, 0, .1, 1200, 7, -1, 1, 1, 1),
+                  Weapon.new(1, 0, 1, 0, .2, 300, 7, -1, 1, .004),
                   1,
                   .1
             ))
@@ -1221,7 +1223,7 @@ function Proj:process(delta)
          if self.type_idx == 4 then
             local tgt_angle = math.atan2(rel_pos_x * self.dir_y - rel_pos_y * self.dir_x,
                self.dir_x * rel_pos_x + self.dir_y * rel_pos_y)
-            local dangle = math.min(math.max(-.015, tgt_angle), .015)
+            local dangle = math.min(math.max(-.005, tgt_angle), .005)
             local own_angle = math.atan2(self.dir_y, self.dir_x) - dangle
             self.dir_x = math.cos(own_angle)
             self.dir_y = math.sin(own_angle)
@@ -1550,8 +1552,6 @@ end
 function init()
    local start_room = g_map_gen()
    g_player = Player.new(start_room)
-   g_comp_pos_x = 0
-   g_comp_pos_y = 0
    g_projs = {}
    g_hitmarks = {}
    g_enemies = {}
@@ -1562,6 +1562,8 @@ function init()
 end
 
 function BOOT()
+   g_comp_pos_x = 0
+   g_comp_pos_y = 0
    init()
    g_items = {}
    g_t = time()
@@ -1580,12 +1582,12 @@ function process_game(delta)
    local hitmarks = g_hitmarks
    local enemies = g_enemies
 
-   if g_screen_shake_timer < 450 then
+   if g_screen_shake_timer < 250 then
       local screen_shake_timer = g_screen_shake_timer
       local math_random = math.random
       g_screen_shake_timer = screen_shake_timer + delta
-      poke(0x3FF9, (math_random() - .5) * (600 - screen_shake_timer) * .05)
-      poke(0x3FFA, (math_random() - .5) * (600 - screen_shake_timer) * .05)
+      poke(0x3FF9, (math_random() - .5) * (600 - screen_shake_timer) * .03)
+      poke(0x3FFA, (math_random() - .5) * (600 - screen_shake_timer) * .03)
       poke(0x3FF8, math_random(4))
    end
 
@@ -1792,12 +1794,11 @@ gc_controls_how_to_play_text = {
 function process_title_screen(delta)
    cls()
 
-   --map(210, 102)
-
    local projs = g_projs
    local hitmarks = g_hitmarks
    local table_insert = table.insert
 
+   -- Ping
    local cooldown = g_menu_ping_cooldown
    g_menu_ping_cooldown = cooldown - delta
    if cooldown < 0 then
@@ -1835,8 +1836,7 @@ function process_title_screen(delta)
    local mouse_x, mouse_y, mouse_left, mouse_mid, mouse_right = table.unpack(g_mouse)
    if mouse_left or mouse_mid or mouse_right then
       g_state = 5
-      g_hitmarks = {}
-      g_projs = {}
+      sfx(20)
    end
 end
 gc_menu_ping_locs = {
