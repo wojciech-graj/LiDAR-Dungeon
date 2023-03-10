@@ -7,7 +7,7 @@
 -- script:  lua
 
 --[[
-    LiDAR Dungeon -
+    LiDAR Dungeon
     Copyright (C) 2023  Wojciech Graj
 
     This program is free software: you can redistribute it and/or modify
@@ -280,6 +280,7 @@ end
 -- @param floors int or nil
 function g_print_stats(stats, pos_x, pos_y, floors)
    local string_format = string.format
+   local math_floor = math.floor
 
    if floors then
       print(string_format("Floors Cleared.....%d", floors), pos_x, pos_y, 13, true, 1, true)
@@ -289,12 +290,12 @@ function g_print_stats(stats, pos_x, pos_y, floors)
    print(string_format("Damage Taken.......%.1f", stats.damage_taken), pos_x, pos_y, 13, true, 1, true)
    print(string_format("Damage Dealt.......%.1f", stats.damage_dealt), pos_x, pos_y + 8, 13, true, 1, true)
    print(string_format("Bullets Fired......%d", stats.bullets_fired), pos_x, pos_y + 16, 13, true, 1, true)
-   print(string_format("Accuracy...........%.1f", 100 * stats.bullets_hit / stats.bullets_fired), pos_x, pos_y + 24, 13, true, 1, true)
+   print(string_format("Seconds Elapsed....%d", math_floor(stats.time_total / 1000)), pos_x, pos_y + 24, 13, true, 1, true)
    print(string_format("Bullets Taken......%d", stats.bullets_taken), pos_x, pos_y + 32, 13, true, 1, true)
    print(string_format("Scans Performed....%d", stats.pings), pos_x, pos_y + 40, 13, true, 1, true)
    print(string_format("Upgrades Obtained..%d", stats.items_collected), pos_x, pos_y + 48, 13, true, 1, true)
    print(string_format("Enemies Destroyed..%d", stats.enemies_destroyed), pos_x, pos_y + 56, 13, true, 1, true)
-   print(string_format("Distance Travelled.%d", math.floor(stats.distance_travelled)), pos_x, pos_y + 64, 13, true, 1, true)
+   print(string_format("Distance Travelled.%d", math_floor(stats.distance_travelled)), pos_x, pos_y + 64, 13, true, 1, true)
 end
 
 function g_exit_spawn(tile_x, tile_y)
@@ -1370,6 +1371,7 @@ Stats = {
    items_collected = 0,
    enemies_destroyed = 0,
    distance_travelled = 0,
+   time_total = 0,
 }
 Stats.__index = Stats
 
@@ -1388,6 +1390,7 @@ function Stats:add(stat)
    self.items_collected = self.items_collected + stat.items_collected
    self.enemies_destroyed = self.enemies_destroyed + stat.enemies_destroyed
    self.distance_travelled = self.distance_travelled + stat.distance_travelled
+   self.time_total = self.time_total + stat.time_total
 end
 
 ----------------------------------------
@@ -1450,6 +1453,7 @@ function Player:process(delta)
    self.ping_cooldown = math_max(self.ping_cooldown - delta, 0)
    self.ping_passive_cooldown = self.ping_passive_cooldown - delta
    self.iframe_cooldown = math_max(self.iframe_cooldown - delta, 0)
+   self.stats_flr.time_total = self.stats_flr.time_total + delta
 
    if self.ping_passive_cooldown < 0 then
       self.ping_passive_cooldown = self.ping_cooldown_max
