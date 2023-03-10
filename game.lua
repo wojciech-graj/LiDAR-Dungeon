@@ -179,6 +179,7 @@ end
 function g_item_pickup(pos_x, pos_y)
    mset(pos_x, pos_y, 0)
    g_state = 2
+   sfx(21)
    local math_random = math.random
 
    -- select 2 different item types
@@ -299,7 +300,7 @@ end
 function g_exit_spawn(tile_x, tile_y)
    g_comp_pos_x = tile_x + .5
    g_comp_pos_y = tile_y + .5
-   mset(tile_x, tile_y, 32)
+   mset(tile_x, tile_y, mget(tile_x, tile_x) & 0x7 + 32)
 end
 
 ----------------------------------------
@@ -941,7 +942,7 @@ function Enemy.new(pos_x, pos_y, speed, health, weapon, ai_idx, loot_chance)
    self.health = health
    self.weapon = weapon
    self.ai_idx = ai_idx
-   self.loot_chance = loot_chance or .2
+   self.loot_chance = loot_chance or .25
    mset(pos_x, pos_y, 0)
    self:mark_area(true)
    return self
@@ -1030,13 +1031,18 @@ function Enemy:process(delta)
             speed_fwd = 0
          end
          self.weapon:fire(self.pos_x, self.pos_y, self.angle)
+         self.angle = math.atan2(dir_y, dir_x)
       else
          dir_x = self.pos_x_player_last - self.pos_x
          dir_y = self.pos_y_player_last - self.pos_y
          dir_mag = math.sqrt(dir_x * dir_x + dir_y * dir_y)
          speed_fwd = math.min(self.speed, dir_mag)
+         self.angle = math.atan2(dir_y, dir_x)
+
+         if isect.dist < 1 then
+            self.angle = self.angle + (math.random() - .5) * .5
+         end
       end
-      self.angle = math.atan2(dir_y, dir_x)
 
       if self.ai_idx == 1 then
          --
@@ -1045,8 +1051,8 @@ function Enemy:process(delta)
          if self.ai_idx == 3 then
             speed_fwd = speed_fwd + (math.random() - .5) * self.vel_side * 2
          end
-         self.vel_side = math.min(math.max(self.speed * -.4, self.vel_side), self.speed * .4)
       end
+      self.vel_side = math.min(math.max(self.speed * -.4, self.vel_side), self.speed * .4)
       self:move_rel(speed_fwd, self.vel_side)
    else -- self.ai_idx == 5
       self.angle = math.atan2(dir_y, dir_x)
@@ -1601,13 +1607,16 @@ function process_item_pickup(delta)
          if mouse_x >= 44 and mouse_x <= 92 then
             items[1]:apply()
             g_state = 1
+            sfx(20)
          elseif mouse_x >= 116 and mouse_x < 164 then
             items[2]:apply()
             g_state = 1
+            sfx(20)
          end
       elseif mouse_y >= 104 and mouse_y <= 112
          and mouse_x >= 76 and mouse_x <= 124 then
          g_state = 1
+         sfx(20)
       end
    end
 end
@@ -1631,6 +1640,7 @@ function process_floor_clear(delta)
    if mouse_left and not g_mouse_prev[3]
       and mouse_y >= 104 and mouse_y <= 112
       and mouse_x >= 68 and mouse_x <= 132 then
+      sfx(20)
       player.floor = player.floor + 1
       if player.floor % 2 == 1 then
          for _, v in pairs(g_enemies) do
@@ -1688,6 +1698,7 @@ function process_game_end(delta)
       and mouse_y >= 104 and mouse_y <= 112
       and mouse_x >= 68 and mouse_x <= 132 then
       init()
+      sfx(20)
    end
 end
 gc_game_over_text_tab = {
@@ -1713,6 +1724,7 @@ function process_controls(delta)
    if mouse_left and not g_mouse_prev[3]
       and mouse_y >= 112 and mouse_y <= 120
       and mouse_x >= 136 and mouse_x <= 224 then
+      sfx(20)
       g_state = 1
    end
 end
@@ -2058,6 +2070,8 @@ end
 -- 017:e120c130b150918081b061d051f041e031c041a0619081609140b130b110c110d100e100f100f100f100f100f100f100f100f100f100e100e100f100400000000000
 -- 018:13b07370c320e310f310f300f300f300f300f300f300f300f300f300f300f300f300f300f300f300f300f300f300f300f300f300f300f300f300f300005000000000
 -- 019:631063106310632063206330634063606370639063b063c063c063a06390738083609340a330b310c300d300e300e300f300f300f300f300f300f300005000000000
+-- 020:9140910091d0f100f100f100f100f100f100f100f100f100f100f100f100f100f100f100f100f100f100f100f100f100f100f100f100f100f100f10070b000000000
+-- 021:510051005100510051005100510051005100519051905190519051905190519051905190519061906190719081909190a190b190c190d190e190f190500000000000
 -- </SFX>
 
 -- <PATTERNS>
@@ -2078,4 +2092,3 @@ end
 -- <PALETTE>
 -- 000:1a1c2c5d275db13e53ef7d57ffcd75a7f07038b76425717929366f3b5dc941a6f673eff7f4f4f494b0c2566c86333c57
 -- </PALETTE>
-
