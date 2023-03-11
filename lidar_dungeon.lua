@@ -36,7 +36,7 @@
 --- Interfaces
 -- Entity:
 -- VARIABLES: pos_x, pos_y, angle, health
--- FUNCTIONS: move_abs, move_rel, damage
+-- FUNCTIONS: move_abs, move_rel, damage, draw_sprite
 
 --- Map Data
 -- 0: Empty
@@ -55,16 +55,10 @@
 -- utility functions -------------------
 ----------------------------------------
 
---- Get the sign of a number
--- @return int
-function g_math_sign(x)
-   return x > 0 and 1 or x < 0 and -1 or 0
-end
-
 --- Calculate a ray-map intersection
 -- Uses Digital Differential Analyzer (DDA) voxel traversal to find closest wall
 -- intersection.
--- @return table
+-- @return dist number, side int
 function g_ray_isect(pos_x, pos_y, dir_x, dir_y)
    local math_floor = math.floor
    local math_abs = math.abs
@@ -114,20 +108,15 @@ function g_ray_isect(pos_x, pos_y, dir_x, dir_y)
       end
    end
 
-   local ray_isect_tab = g_ray_isect_tab
-   ray_isect_tab.side = side
+   local dist
    if side == 0 then
-      ray_isect_tab.dist = side_dist_x - delta_dist_x
+      dist = side_dist_x - delta_dist_x
    else -- side == 1
-      ray_isect_tab.dist = side_dist_y - delta_dist_y
+      dist = side_dist_y - delta_dist_y
    end
 
-   return ray_isect_tab
+   return dist, side
 end
-g_ray_isect_tab = {
-   dist = 0,
-   side = 0,
-}
 
 --- Get ray-circle collision
 -- @return squared distance along ray if colliding, 1e9 otherwise
@@ -139,29 +128,6 @@ function g_ray_circ_collides(rel_pos_x, rel_pos_y, dir_x, dir_y, rad)
       end
    end
    return 1e9
-end
-
---- Draw a triangular sprite
-function g_draw_sprite(pos_x, pos_y, angle, color)
-   local math_cos = math.cos
-   local math_sin = math.sin
-   local player = g_player
-
-   if pos_x > player.pos_x_scr * 25 and pos_x < player.pos_x_scr * 25 + 25
-      and pos_y > player.pos_y_scr * 17 and pos_y < player.pos_y_scr * 17 + 17 then
-      local pos_x_scl = (pos_x % 25) * 8
-      local pos_y_scl = (pos_y % 17) * 8
-
-      tri(
-         pos_x_scl + 4 * math_cos(angle),
-         pos_y_scl + 4 * math_sin(angle),
-         pos_x_scl + 4 * math_cos(angle + 2.7),
-         pos_y_scl + 4 * math_sin(angle + 2.7),
-         pos_x_scl + 4 * math_cos(angle - 2.7),
-         pos_y_scl + 4 * math_sin(angle - 2.7),
-         color
-      )
-   end
 end
 
 --- Spawn explosion projectiles
@@ -177,7 +143,7 @@ end
 
 --- Pick up item
 function g_item_pickup(pos_x, pos_y)
-   mset(pos_x, pos_y, 0)
+   mset(pos_x, pos_y, mget(pos_x, pos_y) & 0x7)
    g_state = 2
    sfx(21)
    local math_random = math.random
@@ -287,24 +253,43 @@ function g_print_stats(stats, pos_x, pos_y, floors)
       pos_y = pos_y + 8
    end
 
-   print(string_format("Damage Taken.......%.1f", stats.damage_taken), pos_x, pos_y, 13, true, 1, true)
-   print(string_format("Damage Dealt.......%.1f", stats.damage_dealt), pos_x, pos_y + 8, 13, true, 1, true)
-   print(string_format("Bullets Fired......%d", stats.bullets_fired), pos_x, pos_y + 16, 13, true, 1, true)
-   print(string_format("Seconds Elapsed....%d", math_floor(stats.time_total / 1000)), pos_x, pos_y + 24, 13, true, 1, true)
-   print(string_format("Bullets Taken......%d", stats.bullets_taken), pos_x, pos_y + 32, 13, true, 1, true)
-   print(string_format("Scans Performed....%d", stats.pings), pos_x, pos_y + 40, 13, true, 1, true)
-   print(string_format("Upgrades Obtained..%d", stats.items_collected), pos_x, pos_y + 48, 13, true, 1, true)
-   print(string_format("Enemies Destroyed..%d", stats.enemies_destroyed), pos_x, pos_y + 56, 13, true, 1, true)
-   print(string_format("Distance Travelled.%d", math_floor(stats.distance_travelled)), pos_x, pos_y + 64, 13, true, 1, true)
+   local format_values = {
+      stats.damage_taken,
+      stats.damage_dealt,
+      stats.bullets_fired,
+      math_floor(stats.time_total / 1000),
+      stats.bullets_taken,
+      stats.pings,
+      stats.items_collected,
+      stats.enemies_destroyed,
+      math_floor(stats.distance_travelled),
+   }
+   local formats = gc_stats_format_strings
+   for i = 1, #formats do
+      print(string_format(formats[i], format_values[i]), pos_x, pos_y + i * 8 - 8, 13, true, 1, true)
+   end
 end
+gc_stats_format_strings = {
+   "Damage Taken.......%.1f",
+   "Damage Dealt.......%.1f",
+   "Bullets Fired......%d",
+   "Seconds Elapsed....%d",
+   "Bullets Taken......%d",
+   "Scans Performed....%d",
+   "Upgrades Obtained..%d",
+   "Enemies Destroyed..%d",
+   "Distance Travelled.%d",
+}
 
+--- Place an exit on the map
 function g_exit_spawn(tile_x, tile_y)
    g_comp_pos_x = tile_x + .5
    g_comp_pos_y = tile_y + .5
    mset(tile_x, tile_y, (mget(tile_x, tile_y) & 0x7) + 32)
 end
 
-function g_pix_menu(pos_x, pos_y, color)
+--- pix, but for the title screen
+function g_pix_title_screen(pos_x, pos_y, color)
    pix((pos_x - 208) * 8, (pos_y - 102) * 8, color)
 end
 
@@ -321,10 +306,9 @@ end
 
 --- Adds area to free areas if suitable
 function g_map_gen_add_area(tab, sx, sy, ex, ey, lx, ly)
-   if lx < 6 or ly < 6 then
-      return
+   if lx >= 6 and ly >= 6 then
+      table.insert(tab, {sx, sy, ex, ey, lx, ly})
    end
-   table.insert(tab, {sx, sy, ex, ey, lx, ly})
 end
 
 --- Digs a corridor out of room
@@ -515,7 +499,7 @@ function g_map_gen()
    local map_place_rand = g_map_place_rand
 
    local start_room = table_remove(rooms, math_random(#rooms))
-   map_place_rand(start_room, 16, 3)
+   map_place_rand(start_room, 16, 3) -- Place 3 upgrades in start room
 
    -- Place items, enemies
    for _, room in pairs(rooms) do
@@ -734,9 +718,9 @@ function Entity:move_abs(dist_x, dist_y)
    local dist_invmag = 1 / dist_mag
    local dir_x = dist_x * dist_invmag
    local dir_y = dist_y * dist_invmag
-   local isect = g_ray_isect(self.pos_x, self.pos_y, dir_x, dir_y)
-   if isect.dist > .4 then -- not approaching wall
-      local dist_min = math.min(dist_mag, math.max(0, isect.dist - .4))
+   local isect_dist = g_ray_isect(self.pos_x, self.pos_y, dir_x, dir_y)
+   if isect_dist > .4 then -- not approaching wall
+      local dist_min = math.min(dist_mag, math.max(0, isect_dist - .4))
       self.pos_x = self.pos_x + dir_x * dist_min
       self.pos_y = self.pos_y + dir_y * dist_min
       return dist_min
@@ -744,14 +728,37 @@ function Entity:move_abs(dist_x, dist_y)
    return 0
 end
 
+--- Draw a triangular sprite
+function Entity:draw_sprite(color)
+   local player = g_player
+
+   if self.pos_x > player.pos_x_scr * 25 and self.pos_x < player.pos_x_scr * 25 + 25
+      and self.pos_y > player.pos_y_scr * 17 and self.pos_y < player.pos_y_scr * 17 + 17 then
+      local math_cos = math.cos
+      local math_sin = math.sin
+      local pos_x_scl = (self.pos_x % 25) * 8
+      local pos_y_scl = (self.pos_y % 17) * 8
+
+      tri(
+         pos_x_scl + 4 * math_cos(self.angle),
+         pos_y_scl + 4 * math_sin(self.angle),
+         pos_x_scl + 4 * math_cos(self.angle + 2.7),
+         pos_y_scl + 4 * math_sin(self.angle + 2.7),
+         pos_x_scl + 4 * math_cos(self.angle - 2.7),
+         pos_y_scl + 4 * math_sin(self.angle - 2.7),
+         color
+      )
+   end
+end
+
 ----------------------------------------
 -- Hitmark -----------------------------
 ----------------------------------------
 
 -- type_idx:
--- 0: wall
--- 1: item
--- 2: exit
+-- 1: wall
+-- 2: item
+-- 3: exit
 
 --- Map-Proj hit indicator
 Hitmark = {
@@ -773,15 +780,15 @@ end
 function Hitmark:process(delta)
    self.age = self.age + delta
    local color
-   if self.type_idx == 0 then
+   if self.type_idx == 1 then
       color = 12 + self.age * .002
-   elseif self.type_idx == 1 then
+   elseif self.type_idx == 2 then
       color = 4
-   else -- self.type_idx == 2
+   else -- self.type_idx == 3
       color = 11
    end
    if g_state == 6 then
-      g_pix_menu(self.pos_x, self.pos_y, color)
+      g_pix_title_screen(self.pos_x, self.pos_y, color)
    else
       g_pix_bounded(self.pos_x, self.pos_y, color)
    end
@@ -936,6 +943,7 @@ Enemy = {
    display_timer = 0,
    move_abs = Entity.move_abs,
    move_rel = Entity.move_rel,
+   draw_sprite = Entity.draw_sprite,
    speed = 0,
    health = 0,
    weapon = nil,
@@ -944,6 +952,8 @@ Enemy = {
    pos_y_player_last = 0,
    vel_side = 0,
    loot_chance = 0,
+   -- b_ai_timer
+   -- b_weapons
 }
 Enemy.__index = Enemy
 
@@ -1018,7 +1028,7 @@ end
 function Enemy:process(delta)
    self.display_timer = self.display_timer + delta
    if self.display_timer < 500 then
-      g_draw_sprite(self.pos_x, self.pos_y, self.angle, 2)
+      self:draw_sprite(2)
    end
 
    self:mark_area(false)
@@ -1031,9 +1041,9 @@ function Enemy:process(delta)
    if self.ai_idx < 5 then
       self.weapon:process(delta)
       local dir_invmag = 1 / dir_mag
-      local isect = g_ray_isect(self.pos_x, self.pos_y, dir_invmag * dir_x, dir_invmag * dir_y)
+      local isect_dist = g_ray_isect(self.pos_x, self.pos_y, dir_invmag * dir_x, dir_invmag * dir_y)
       local speed_fwd
-      if dir_mag < isect.dist then -- in line-of-sight
+      if dir_mag < isect_dist then -- in line-of-sight
          self.pos_x_player_last = player.pos_x
          self.pos_y_player_last = player.pos_y
          if dir_mag < 2 then
@@ -1052,7 +1062,7 @@ function Enemy:process(delta)
          speed_fwd = math.min(self.speed, dir_mag)
          self.angle = math.atan2(dir_y, dir_x)
 
-         if isect.dist < 1 then
+         if isect_dist < 1 then -- wiggle to get unstuck
             self.angle = self.angle + (math.random() - .5) * .5
          end
       end
@@ -1088,12 +1098,12 @@ function Enemy:process(delta)
          if #g_enemies < 4 and math.random() < .05 then
             local math_random = math.random
             table.insert(g_enemies, Enemy.new(self.pos_x,
-                  self.pos_y,
-                  .02,
-                  1,
-                  Weapon.new(1, 0, 1, 0, .2, 300, 7, -1, 1, .004),
-                  1,
-                  .1
+               self.pos_y,
+               .02,
+               1,
+               Weapon.new(1, 0, 1, 0, .2, 300, 7, -1, 1, .004),
+               1,
+               .1
             ))
          end
       end
@@ -1199,9 +1209,7 @@ function Proj.new(pos_x, pos_y, angle, vel, dist_max, bounces, type_idx, damage)
    self.type_idx = type_idx
    self.damage = damage
    if type_idx ~= 6 then
-      local isect = g_ray_isect(pos_x, pos_y, self.dir_x, self.dir_y)
-      self.wall_dist = isect.dist
-      self.wall_side = isect.side
+      self.wall_dist, self.wall_side = g_ray_isect(pos_x, pos_y, self.dir_x, self.dir_y)
    else -- type_idx == 6
       self.wall_dist = 1e9
    end
@@ -1303,7 +1311,7 @@ function Proj:process(delta)
             table.insert(g_hitmarks, Hitmark.new(
                pos_x_floor + .5 + .3 * math.cos(angle),
                pos_y_floor + .5 + .3 * math.sin(angle),
-               (tile == 16) and 1 or 2
+               (tile == 16) and 2 or 3
             ))
             return false
          -- Spawn Enemy
@@ -1336,7 +1344,7 @@ function Proj:process(delta)
          end
 
          if g_state == 6 then
-            g_pix_menu(self.pos_x, self.pos_y, color)
+            g_pix_title_screen(self.pos_x, self.pos_y, color)
          elseif self.type_idx ~= 6 then
             g_pix_bounded(self.pos_x, self.pos_y, color)
          else -- self.type_idx == 6
@@ -1345,7 +1353,7 @@ function Proj:process(delta)
          return false
       end
 
-      table.insert(g_hitmarks, Hitmark.new(self.pos_x, self.pos_y, 0))
+      table.insert(g_hitmarks, Hitmark.new(self.pos_x, self.pos_y, 1))
 
       if self.bounces_rem <= 0 then
          return true
@@ -1360,9 +1368,7 @@ function Proj:process(delta)
          self.dir_y = -self.dir_y
       end
 
-      local isect = g_ray_isect(self.pos_x, self.pos_y, self.dir_x, self.dir_y)
-      self.wall_dist = isect.dist
-      self.wall_side = isect.side
+      self.wall_dist, self.wall_side = g_ray_isect(self.pos_x, self.pos_y, self.dir_x, self.dir_y)
    end
 end
 
@@ -1419,6 +1425,7 @@ Player = {
    weapon = nil,
    move_abs = Entity.move_abs,
    move_rel = Entity.move_rel,
+   draw_sprite = Entity.draw_sprite,
    health = 5,
    speed = .0035,
    ping_cooldown_max = 400,
@@ -1550,7 +1557,7 @@ end
 
 function Player:draw()
    if (self.iframe_cooldown // 100) % 2 == 0 then
-      g_draw_sprite(self.pos_x, self.pos_y, self.angle, 5)
+      self:draw_sprite(5)
    end
 end
 
@@ -1567,22 +1574,22 @@ end
 -- 6: title screen
 -- 7: victory
 
+--- Begin new run
 function init()
    local start_room = g_map_gen()
    g_player = Player.new(start_room)
    g_projs = {}
    g_hitmarks = {}
    g_enemies = {}
-   g_state = 6
    g_screen_shake_timer = 1e9
-   g_menu_ping_cooldown = 0
-   g_menu_ping_counter = 0
 end
 
 function BOOT()
-   g_comp_pos_x = 0
-   g_comp_pos_y = 0
-   init()
+   g_menu_ping_cooldown = 0
+   g_menu_ping_counter = 0
+   g_projs = {}
+   g_hitmarks = {}
+   g_state = 6
    g_items = {}
    g_t = time()
    g_mouse = table.pack(mouse())
@@ -1750,7 +1757,7 @@ function process_game_end(delta)
    if mouse_left and not g_mouse_prev[3]
       and mouse_y >= 104 and mouse_y <= 112
       and mouse_x >= 68 and mouse_x <= 132 then
-      init()
+      g_state = 6
       sfx(20)
    end
 end
@@ -1778,6 +1785,7 @@ function process_controls(delta)
       and mouse_y >= 112 and mouse_y <= 120
       and mouse_x >= 136 and mouse_x <= 224 then
       sfx(20)
+      init()
       g_state = 1
    end
 end
