@@ -3,7 +3,7 @@
 -- desc:    A Bullet-Hell Roguelike made for 7DRL2023
 -- site:    https://github.com/wojciech-graj/LiDAR-Dungeon
 -- license: AGPL-3.0-or-later
--- version: 0.0
+-- version: 1.0
 -- script:  lua
 
 --[[
@@ -2446,4 +2446,3 @@ end
 -- <PALETTE>
 -- 000:1a1c2c5d275db13e53ef7d57ffcd75a7f07038b76425717929366f3b5dc941a6f673eff7f4f4f494b0c2566c86333c57
 -- </PALETTE>
-
